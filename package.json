@@ -1,19 +1,14 @@
 {
-  "name": "react-redux-starter-kit",
+  "name": "front-core-prototype",
   "version": "1.0.0",
-  "description": "Starter kit from Fullstack-development company developers",
+  "description": "front core prototype",
   "main": "index.js",
   "scripts": {
-    "check-types": "tsc -p . --noEmit",
     "dev": "npm run watch:dev",
     "prod": "npm run watch:prod",
     "deploy:gh-pages": "npm run build:gh-pages && gh-pages -d build",
     "watch:dev": "better-npm-run watch:dev",
     "watch:prod": "better-npm-run watch:prod",
-    "server:dev": "better-npm-run server:dev",
-    "server:dev:debug": "better-npm-run server:dev:debug",
-    "server:prod": "better-npm-run server:prod",
-    "server:prod:debug": "better-npm-run server:prod:debug",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:debug": "node --inspect-brk jest --runInBand --watch",
@@ -23,59 +18,9 @@
     "build:gh-pages": "better-npm-run build:gh-pages",
     "analyze:dev": "better-npm-run analyze:dev",
     "analyze:prod": "better-npm-run analyze:prod",
-    "yeoman": "better-npm-run initial:yeoman",
-    "lint": "eslint . --ext .js,.jsx,.ts,.tsx && stylelint \"./src/**/*.scss\" && tsc --noEmit --pretty",
     "lint:autofix": "eslint . --ext .ts --ext .tsx --fix && stylelint \"./src/**/*.scss\" --fix"
   },
   "betterScripts": {
-    "initial:yeoman": {
-      "command": "sh ./generators/initializationGenerator.sh",
-      "env": {
-        "NODE_ENV": "development"
-      }
-    },
-    "server:dev": {
-      "command": "node -r ts-node/register ./server/index.ts",
-      "env": {
-        "PORT": 8080,
-        "TS_NODE_FILES": true,
-        "WATCH_MODE": true,
-        "NODE_ENV": "development",
-        "TS_NODE_COMPILER_OPTIONS": "{\"target\": \"es6\", \"module\": \"commonjs\"}",
-        "THREADED": false
-      }
-    },
-    "server:dev:debug": {
-      "command": "node --inspect --inspect-brk -r ts-node/register ./server/index.ts",
-      "env": {
-        "PORT": 8080,
-        "TS_NODE_FILES": true,
-        "WATCH_MODE": true,
-        "NODE_ENV": "development",
-        "TS_NODE_COMPILER_OPTIONS": "{\"target\": \"es6\", \"module\": \"commonjs\"}",
-        "THREADED": false
-      }
-    },
-    "server:prod": {
-      "command": "node -r ts-node/register ./server/index.ts",
-      "env": {
-        "PORT": 8080,
-        "TS_NODE_FILES": true,
-        "NODE_ENV": "production",
-        "TS_NODE_COMPILER_OPTIONS": "{\"target\": \"es5\", \"module\": \"commonjs\"}",
-        "THREADED": true
-      }
-    },
-    "server:prod:debug": {
-      "command": "node --inspect --inspect-brk -r ts-node/register ./server/index.ts",
-      "env": {
-        "PORT": 8080,
-        "TS_NODE_FILES": true,
-        "NODE_ENV": "production",
-        "TS_NODE_COMPILER_OPTIONS": "{\"target\": \"es5\", \"module\": \"commonjs\"}",
-        "THREADED": true
-      }
-    },
     "watch:dev": {
       "command": "node_modules/.bin/webpack-dev-server --watch --progress --colors --config webpack/dev.config.ts",
       "env": {
