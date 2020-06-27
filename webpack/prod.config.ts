@@ -1,0 +1,25 @@
+import webpack from 'webpack';
+
+import { getCommonPlugins, getCommonRules, commonConfig, getStyleRules, BuildType } from './common';
+
+const getProdConfig: (type?: BuildType) => webpack.Configuration = type => {
+  const rules = [
+    ...getCommonRules(type || 'prod'),
+    ...getStyleRules(type || 'prod'),
+  ];
+
+  return {
+    ...commonConfig,
+    mode: 'production',
+    entry: {
+      app: './entry.tsx',
+    },
+    module: {
+      rules,
+    },
+    plugins: getCommonPlugins(type || 'prod'),
+  };
+};
+
+/* eslint import/no-default-export: 0 */
+export default getProdConfig;
