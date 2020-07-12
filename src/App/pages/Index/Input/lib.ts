@@ -2,52 +2,34 @@ import * as R from 'ramda';
 import { BehaviorSubject } from 'rxjs';
 import * as o from 'rxjs/operators';
 
-type Lens<T> = {
-  getFocus(): string[];
-  value: T;
-}
+type Use<State, T> = (state: State) => T;
 
-type LensOf<T> = {
-  [P in keyof T]: T[P] extends Record<string, any> ? LensOf<T[P]> : Lens<T[P]>
-}
-
-type ArgsOf<T> = T
-
-type UnknownSelector<State> = (state: LensOf<State>) => Lens<unknown>
-
-export type DerivedStateElementDescription<State, P extends string, U extends Array<UnknownSelector<State>>, V> = {
-  property: P;
-  uses: U;
-  select(...args: ArgsOf<U>): V;
-}
-
-// type DerivedStateDescription = Record<string, DerivedStateElementDescription>
-
-// type DerivedStateSelector = {
-//   selectedProperty: string;
-//   select(state: any): any;
+// type ControllerPublicInterface<Methods extends Record<string, (args: any) => void>> = {
+//   methods: Methods;
 // }
 
-export function makeEmptyLens<T>(): Lens<T> {
-  function proxyTree(lensAcc: string[]): Lens<T> {
-    return new Proxy(
-      { getFocus: () => lensAcc } as Lens<T>,
-      {
-        get: (obj, key) => key === 'getFocus'
-          ? obj.getFocus
-          : proxyTree(lensAcc.concat(key as string))
-      }
-    )
-  }
-
-  return proxyTree([]);
-}
-
 type Controller<State> = {
-  stream: BehaviorSubject<State>;
-  defineDerivedState<P extends string, U extends Array<UnknownSelector<State>>, V>(
-    description: DerivedStateElementDescription<State, P, U, V>): Controller<State & Record<P, V>>
+  // stream: BehaviorSubject<State>;
+  // getPublicInterface(): ControllerPublicInterface<Methods>;
+  defineDerivedState<P extends string, S1, V>(
+    property: P, uses: [Use<State, S1>], selector: (a1: S1) => V
+  ): Controller<State & Record<P, V>>;
+  defineDerivedState<P extends string, S1, S2, V>(
+    property: P, uses: [Use<State, S1>, Use<State, S2>], selector: (a1: S1, a2: S2) => V
+  ): Controller<State & Record<P, V>>;
+  defineDerivedState<P extends string, S1, S2, S3, V>(
+    property: P, uses: [Use<State, S1>, Use<State, S2>, Use<State, S3>], selector: (a1: S1, a2: S2, a3: S3) => V
+  ): Controller<State & Record<P, V>>;
 }
+
+type S = {
+  value: string;
+  n: number;
+}
+
+const c: Controller<S> = null as any;
+
+// c.defineDerivedState('len', [(x => x.value), x => x.n], (a, b) => a + b)
 
 // return storedStateStream.pipe(o.map(state => arrangedSelectors.reduce((acc, x) => ({
 //   ...acc,
@@ -59,10 +41,12 @@ export function makeStateController<StoredState>(initialState: StoredState) {
   function makeController<State>(stream: BehaviorSubject<State>): Controller<State> {
     return {
       stream,
-      defineDerivedState: function <P extends string, U extends Array<UnknownSelector<State>>, V>
-        (description: DerivedStateElementDescription<State, P, U, V>) {
-        return makeController(addDerivedState(stream, description));
-      },
+      defineDerivedState: function <U extends Array<UnknownSelector<State>>, P extends string>
+        (property: P, uses: U) {
+        console.log(property, uses)
+        // return makeController(addDerivedState(stream, description as any));
+        return addDerivedState as any || null as any;
+      } as any,
     }
   }
 
@@ -84,7 +68,7 @@ function addDerivedState<State, P extends string, U extends Array<UnknownSelecto
   const extendState = (state: State): any => {
     return {
       ...state,
-      [description.property]: description.select(...derivedStateDependencySelectors.map(f => f(state)) as any),
+      [description.property]: (description.select as any)(...derivedStateDependencySelectors.map(f => f(state)) as any),
     }
   };
 
