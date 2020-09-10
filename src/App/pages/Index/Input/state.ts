@@ -7,7 +7,7 @@ type S = {
 // const c = makeStateController<S>({ value: 'privet', n: 1 })
 //   .defineDerivedState('len', [(x => x.value)])
 
-const controller = makeStateController<S>({value: 'privet' })
+export const {useState, methods } = makeStateController<S>({value: 'privet' })
   .defineDerivedState(
     'valueLength',
     [state => state.value],
@@ -19,14 +19,11 @@ const controller = makeStateController<S>({value: 'privet' })
     x => x / 2,
   )
   .defineEvents(({makeEvent}) => {
-    const setValue = makeEvent('setValue', (state, a: {newValue: string}) => ({...state, });
+    const setValue = makeEvent(
+      'setValue',
+      (state, {newValue}: {newValue: string}): S =>
+        ({...state, value: newValue})
+    );
 
-  })
-
-controller.stream.subscribe(x => {
-  console.log('>> subscribe A', x);
-});
-
-controller.stream.subscribe(x => {
-  console.log('>> subscribe B', x);
-});
+    return [setValue];
+  }).getViewInterface();

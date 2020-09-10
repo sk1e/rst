@@ -1,4 +1,4 @@
-import { U, L, I } from 'ts-toolbelt';
+import { U } from 'ts-toolbelt';
 // import * as R from 'ramda';
 import { BehaviorSubject, Subject, Observable } from 'rxjs';
 import * as o from 'rxjs/operators';
@@ -22,10 +22,10 @@ type Event<Name extends string, FullState, StoredState, Args> = {
   emit(args: Args): void;
 }
 
-type EventMini<Name extends String, Args> = {
-  name: Name;
-  mapper: (state: any, args: Args) => any;
-}
+// type EventMini<Name extends String, Args> = {
+//   name: Name;
+//   mapper: (state: any, args: Args) => any;
+// }
 
 type EventNotification<T, FullState, StoredState> = {
   name: string;
@@ -45,16 +45,25 @@ type FinalController<State, EventEmitterMap extends Record<string, (args: any) =
   getViewInterface(): ControllerViewInterface<State, EventEmitterMap>;
 }
 
-type Controller<FullState, EventEmitterMap extends Record<string, (args: any) => void>> = {
+// type Awaited<T> =
+//     T extends null | undefined ? T :
+//     T extends PromiseLike<infer U> ? Awaited<U> :
+//     T;
+
+// type P1 = Awaited<Promise<string>>;  // string
+// type P2 = Awaited<Promise<Promise<string>>>;  // string
+// type P3 = Awaited<Promise<string | Promise<Promise<number> | undefined>>>;  // string | number | undefined
+
+type Controller<StoredState, FullState, EventEmitterMap extends Record<string, (args: any) => void>> = {
   defineDerivedState<P extends string, S1, V>(
     property: P, uses: [Use<FullState, S1>], selector: (a1: S1) => V
-  ): Controller<FullState & Record<P, V>, EventEmitterMap>;
+  ): Controller<StoredState, FullState & Record<P, V>, EventEmitterMap>;
   defineDerivedState<P extends string, S1, S2, V>(
     property: P, uses: [Use<FullState, S1>, Use<FullState, S2>], selector: (a1: S1, a2: S2) => V
-  ): Controller<FullState & Record<P, V>, EventEmitterMap>;
+  ): Controller<StoredState, FullState & Record<P, V>, EventEmitterMap>;
   defineDerivedState<P extends string, S1, S2, S3, V>(
     property: P, uses: [Use<FullState, S1>, Use<FullState, S2>, Use<FullState, S3>], selector: (a1: S1, a2: S2, a3: S3) => V
-  ): Controller<FullState & Record<P, V>, EventEmitterMap>;
+  ): Controller<StoredState, FullState & Record<P, V>, EventEmitterMap>;
   // defineDerivedState<P extends string, S1, S2, S3, S4, V>(
   //   property: P, uses: [
   //     Use<State, S1>,
@@ -87,7 +96,7 @@ type Controller<FullState, EventEmitterMap extends Record<string, (args: any) =>
   // ): Controller<State & Record<P, V>, EventEmitterMap>;
 
   // defineEvents<EventList extends Array<EventMini<string, any>>>( // not State, State
-  defineEvents<StoredState, EventList extends Array<Event<string, FullState, StoredState, any>>>( // not State, State      //
+  defineEvents<EventList extends Array<Event<string, FullState, StoredState, any>>>( // not State, State      //
     getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList // not State, State
   ): FinalController<FullState, EventEmitterMap & EventEmitterMapOf<EventList>>;
 }
@@ -97,29 +106,22 @@ type S = {
   n: number;
 }
 
-// type _EventMapOf<T extends Array<Event<string, any, any, any>>, Acc = {}, X extends Event<string, any, any, any> = L.Head<T>> = {
-//   0: Acc;
-//   1: _EventMapOf<L.Tail<T>, Acc & Record<X['name'], (args: Parameters<X['mapper']>[1]) => void>>
-// }[T['length'] extends 0 ? 0 : 1]
-
-type _EventMapOf<T extends Array<EventMini<string, any>>, Acc = {}, I extends I.Iteration = I.IterationOf<'0'>> = {
-  0: Acc;
-  1: _EventMapOf<T, Acc & Record<T[I.Pos<I>]['name'], (args: Parameters<T[I.Pos<I>]['mapper']>[1]) => void>, I.Next<I>>;
-}[I.Pos<I> extends L.Length<T> ? 0 : 1]
-
-
-// type _Reverse<L extends List, LO extends List, I extends Iteration = IterationOf<'0'>> = {
-//   0: _Reverse<L, Prepend<LO, L[Pos<I>]>, Next<I>>;
-//   1: LO;
-// }[Pos<I> extends Length<L> ? 1 : 0];
+type _EventMapOf<T, Acc = {}> =
+  T extends []
+    ? Acc
+    : T extends [Event<infer Name, any, any, infer Args>, ...infer XS]
+      ? _EventMapOf<XS, Acc & Record<Name, (args: Args) => void>>
+      : never;
 
 type EventEmitterMapOf<List> = List extends Array<infer T>
   ? U.ListOf<T> extends Array<Event<string, any, any, any>> ? _EventMapOf<U.ListOf<T>> : never
   : never
 
-const c: Controller<S, {}> = null as any;
+
+const c: Controller<S, S, {}> = null as any;
 
 c.defineEvents(({ makeEvent }) => {
+
   const setValue = makeEvent(
     'setValue',
     (state, { newValue }: { newValue: string }) => {
@@ -136,7 +138,7 @@ c.defineEvents(({ makeEvent }) => {
 
   return [setValue, setNumber];
 })
-// .getViewInterface().methods.setValue({newValue})
+.getViewInterface()
 
 // c.defineDerivedState('len', [(x => x.value), x => x.n], (a, b) => a + b)
 
@@ -253,23 +255,22 @@ export function makeStateController<StoredState>(initialStoredState: StoredState
     }
   }
 
-
-  function makeController<State, Methods extends Record<string, (args: any) => void>>(
+  function makeController<FullState, Methods extends Record<string, (args: any) => void>>(
     derivedStateAcc: any[],
-  ): Controller<State, Methods> {
+  ): Controller<StoredState, FullState, Methods> {
 
-    const defineDerivedState: Controller<State, Methods>['defineDerivedState'] =
+    const defineDerivedState: Controller<StoredState, FullState, Methods>['defineDerivedState'] =
     // const defineDerivedState =
-      <P extends string, V>(property: P, uses: any, selector: (...args: any[]) => V): Controller<State & Record<P, V>, Methods> => {
+      <P extends string, V>(property: P, uses: any, selector: (...args: any[]) => V): Controller<StoredState, FullState & Record<P, V>, Methods> => {
         return makeController(derivedStateAcc.concat({ property, uses, selector }))
       }
 
-    const defineEvents: Controller<State, Methods>['defineEvents'] =
+    const defineEvents: Controller<StoredState, FullState, Methods>['defineEvents'] =
     // const defineEvents =
-      <EventList extends Array<Event<string, State, StoredState, any>>>(
-        getEvents: (args: GetEventsArguments<State, StoredState>) => EventList
-      // ): FinalController<any, EventEmitterMapOf<EventList>> => {
-      ): FinalController<State, EventEmitterMapOf<EventList>> => {
+      <EventList extends Array<Event<string, FullState, StoredState, any>>>(
+        getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList
+      // ): FinalController<FullState, any> => {
+      ): FinalController<FullState, EventEmitterMapOf<EventList>> => {
 
         // const events = getEvents({ makeEvent });
 
@@ -290,7 +291,7 @@ export function makeStateController<StoredState>(initialStoredState: StoredState
 
   // const storedStateStream = new BehaviorSubject<StoredState>(initialState);
 
-  return makeController([]);
+  return makeController<StoredState, {}>([]);
   // return makeController(storedStateStream)
 }
 
