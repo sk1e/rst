@@ -10,8 +10,9 @@ type ControllerViewInterface<State, Methods extends Record<string, (args: any) =
   useState(): State;
 }
 
-type ControllerParentInterface<Name extends string> = {
+type ControllerParentInterface<Name extends string, Deps extends Dependencies<any, any, any>> = {
   name: Name;
+  initializeDependencies(dependencies: Deps): void;
 }
 
 
@@ -34,8 +35,8 @@ type GetEventsArguments<FullState, StoredState> = {
 
 type EventHandler<FullState, StoredState, Args> = (state: FullState, args: Args) => StoredState | Observable<StoredState>;
 
-type FinalController<Name extends string, State, EventEmitterMap extends Record<string, (args: any) => void>> = {
-  getViewInterface(): ControllerViewInterface<State, EventEmitterMap>;
+type FinalController<Name extends string, FullState, EventEmitterMap extends Record<string, (args: any) => void>> = {
+  getViewInterface(): ControllerViewInterface<FullState, EventEmitterMap>;
   getParentInterface(): ControllerParentInterface<Name>
 }
 
@@ -50,23 +51,23 @@ type Dependencies<Data extends Record<string, any>, Events extends Record<string
   view: View;
 }
 
-type DependencyDefinitionInterface<StoredState, Deps extends Dependencies<any, any, any>> = {
+type DependencyDefinitionInterface<Name extends string, StoredState, Deps extends Dependencies<any, any, any>> = {
   defineDataDependency<Key extends string, Data>
-  (): ControllerWithDependencies<StoredState, Deps & Dependencies<Record<Key, Data>, {}, {}>>;
+  (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<Record<Key, Data>, {}, {}>>;
   // TODO payload could be empty
   defineEventDependency<Key extends string, Payload>
-  (): ControllerWithDependencies<StoredState, Deps & Dependencies<{}, Record<Key, Payload>, {}>>;
+  (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<{}, Record<Key, Payload>, {}>>;
   defineViewDependency<Key extends string, Props = {}>
-  (): ControllerWithDependencies<StoredState, Deps & Dependencies<{}, {}, Record<Key, Props>>>;
+  (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<{}, {}, Record<Key, Props>>>;
 }
 
-type DerivedStateDefinitionInterface<StoredState, FullState> = {
+type DerivedStateDefinitionInterface<Name extends string, StoredState, FullState> = {
   defineDerivedState<P extends string, S1, V>(
     property: P, uses: [Use<FullState, S1>], selector: (a1: S1) => V
-  ): ControllerWithDerivedState<StoredState, FullState & Record<P, V>>;
+  ): ControllerWithDerivedState<Name, StoredState, FullState & Record<P, V>>;
  defineDerivedState<P extends string, S1, S2, V>(
     property: P, uses: [Use<FullState, S1>, Use<FullState, S1>], selector: (a1: S1, a2: S2) => V
-  ): ControllerWithDerivedState<StoredState, FullState & Record<P, V>>;
+  ): ControllerWithDerivedState<Name, StoredState, FullState & Record<P, V>>;
 }
 
 type EventsDefinitionInterface<Name extends string ,StoredState, FullState> = {
@@ -75,18 +76,18 @@ type EventsDefinitionInterface<Name extends string ,StoredState, FullState> = {
   ): FinalController<Name, FullState, EventEmitterMapOf<EventList>>;
 }
 
-type ControllerWithName = {
-  defineStoredState<StoredState>(initialStoredState: StoredState): ControllerWithStoredState<StoredState>;
+type ControllerWithName<Name extends string> = {
+  defineStoredState<StoredState>(initialStoredState: StoredState): ControllerWithStoredState<Name, StoredState>;
 }
 
-type ControllerWithStoredState<StoredState> =
-  DependencyDefinitionInterface<StoredState, Dependencies<{}, {}, {}>>;
+type ControllerWithStoredState<Name extends string, StoredState> =
+  DependencyDefinitionInterface<Name, StoredState, Dependencies<{}, {}, {}>>;
 
 type ControllerWithDerivedState<Name extends string, StoredState, FullState> =
-  DerivedStateDefinitionInterface<StoredState, FullState> & EventsDefinitionInterface<Name, StoredState, FullState>;
+  DerivedStateDefinitionInterface<Name, StoredState, FullState> & EventsDefinitionInterface<Name, StoredState, FullState>;
 
-type ControllerWithDependencies<StoredState, Deps extends Dependencies<any, any, any>> =
-  DependencyDefinitionInterface<StoredState, Deps> & DerivedStateDefinitionInterface<StoredState, {}>;
+type ControllerWithDependencies<Name extends string, StoredState, Deps extends Dependencies<any, any, any>> =
+  DependencyDefinitionInterface<Name, StoredState, Deps> & DerivedStateDefinitionInterface<Name, StoredState, {}>;
 
 // type ControllerWithDependencies<Name, StoredState, D, FullState> = {
 //   defineDerivedState<P extends string, S1, V>(
@@ -159,36 +160,37 @@ type S = {
   value: string;
 }
 
-// makeViewController<S, 'name'>('name', {value: 'asd'})
-//   .defineDependencies<{
-//     privet: 1,
-
-//   }>();
+makeViewController('test')
+  .defineStoredState<S>({value: ''})
+  .defineDataDependency()
+  .defineDerivedState()
+  .defineEvents()
+;
 
 export function makeViewController<Name extends string>(name: Name) {
   return makeControllerWithName();
 
-  function makeControllerWithName(): ControllerWithName {
+  function makeControllerWithName(): ControllerWithName<Name> {
     return {
-      defineStoredState: <StoredState>(initialStoredState: StoredState): ControllerWithStoredState<StoredState> => {
+      defineStoredState: <StoredState>(initialStoredState: StoredState): ControllerWithStoredState<Name, StoredState> => {
         return makeControllerWithStoredState(initialStoredState)
       }
     }
   }
 
   function getDependenciesDefinitionInterface<StoredState, Deps extends Dependencies<any, any, any>>
-    (initialStoredState: StoredState): DependencyDefinitionInterface<StoredState, Deps> {
+    (initialStoredState: StoredState): DependencyDefinitionInterface<Name, StoredState, Deps> {
       return {
         defineDataDependency<Key extends string, Data>
-          (): ControllerWithDependencies<StoredState, Deps & Dependencies<Record<Key, Data>, {}, {}>> {
+          (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<Record<Key, Data>, {}, {}>> {
             return makeControllerWithDepedencies(initialStoredState);
         },
         defineEventDependency<Key extends string, Payload>
-          (): ControllerWithDependencies<StoredState, Deps & Dependencies<{}, Record<Key, Payload>, {}>> {
+          (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<{}, Record<Key, Payload>, {}>> {
             return makeControllerWithDepedencies(initialStoredState);
           },
         defineViewDependency<Key extends string, Props = {}>
-          (): ControllerWithDependencies<StoredState, Deps & Dependencies<{}, {}, Record<Key, Props>>> {
+          (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<{}, {}, Record<Key, Props>>> {
             return makeControllerWithDepedencies(initialStoredState);
           },
         }
@@ -196,18 +198,18 @@ export function makeViewController<Name extends string>(name: Name) {
 
 
   function getDerivedStateDefinitionInterface<StoredState, FullState>
-    (initialStoredState: StoredState, derivedStateDescription: DerivedStateDescription[]): DerivedStateDefinitionInterface<StoredState, FullState> {
+    (initialStoredState: StoredState, derivedStateDescription: DerivedStateDescription[]): DerivedStateDefinitionInterface<Name, StoredState, FullState> {
       return {
         defineDerivedState<P extends string, V>(
           property: P, uses: Array<Use<FullState, any>>, selector: (...args: any[]) => V
-        ): ControllerWithDerivedState<StoredState, FullState & Record<P, V>> {
+        ): ControllerWithDerivedState<Name, StoredState, FullState & Record<P, V>> {
           return makeContollerWithDerivedState(initialStoredState, [...derivedStateDescription, { property, uses, selector }])
         }
       }
     }
 
   function getEventsDefinitionInterface<StoredState, FullState>
-    (initialStoredState: StoredState, derivedStateDescription: DerivedStateDescription[]): EventsDefinitionInterface<StoredState, FullState> {
+    (initialStoredState: StoredState, derivedStateDescription: DerivedStateDescription[]): EventsDefinitionInterface<Name, StoredState, FullState> {
       return {
         defineEvents<EventList extends Array<Event<string, FullState, StoredState, any>>>(
           getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList
@@ -217,14 +219,14 @@ export function makeViewController<Name extends string>(name: Name) {
       };
     }
 
-  function makeControllerWithStoredState<StoredState>(initialStoredState: StoredState): ControllerWithStoredState<StoredState> {
+  function makeControllerWithStoredState<StoredState>(initialStoredState: StoredState): ControllerWithStoredState<Name, StoredState> {
     return getDependenciesDefinitionInterface(initialStoredState);
   }
 
   function makeContollerWithDerivedState<StoredState, FullState>(
     initialStoredState: StoredState,
     derivedStateDescription: DerivedStateDescription[],
-  ): ControllerWithDerivedState<StoredState, FullState> {
+  ): ControllerWithDerivedState<Name, StoredState, FullState> {
 
     return {
       ...getDerivedStateDefinitionInterface(initialStoredState, derivedStateDescription),
@@ -234,7 +236,7 @@ export function makeViewController<Name extends string>(name: Name) {
 
   function makeControllerWithDepedencies<StoredState, Deps extends Dependencies<any, any, any>>(
     initialStoredState: StoredState,
-  ): ControllerWithDependencies<StoredState, Deps> {
+  ): ControllerWithDependencies<Name, StoredState, Deps> {
 
     return {
       ...getDependenciesDefinitionInterface(initialStoredState),
@@ -322,7 +324,7 @@ export function makeViewController<Name extends string>(name: Name) {
     const eventEmitters = events.reduce<EventEmitters>((acc, x) => ({ ...acc, [x.name]: x.emit }), {} as EventEmitters);
 
     return {
-      getViewInterface: () => {
+      getViewInterface () {
         return {
           useState: () => {
             const [state, setState] = React.useState<FullState>(getInitialFullState())
@@ -334,6 +336,11 @@ export function makeViewController<Name extends string>(name: Name) {
           methods: eventEmitters,
         };
       },
+      getParentInterface() {
+        return {
+          name,
+        }
+      }
     }
     }
 
