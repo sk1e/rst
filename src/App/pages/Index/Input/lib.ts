@@ -50,15 +50,15 @@ EventEmitterMap extends Record<string, (args: any) => void>
   // defineDependencies<D extends Dependencies> (): ControllerWithDependencies<Name, StoredState, D, StoredState>;
 // }
 
-type Dependencies<Data extends Record<string, any>, Events extends Record<string, any>, View> = {
-  data: Data;
+type Dependencies<State extends Record<string, any>, Events extends Record<string, any>, View> = {
+  state: State;
   events: Events;
   view: View;
 }
 
 type DependencyDefinitionInterface<Name extends string, StoredState, Deps extends Dependencies<any, any, any>> = {
-  defineDataDependency<Key extends string, Data>
-  (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<Record<Key, Data>, {}, {}>>;
+  defineStateDependency<Key extends string, T>
+  (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<Record<Key, T>, {}, {}>>;
   // TODO payload could be empty
   defineEventDependency<Key extends string, Payload>
   (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<{}, Record<Key, Payload>, {}>>;
@@ -171,7 +171,7 @@ type S = {
 
 makeViewController('test')
   .defineStoredState<S>({value: ''})
-  .defineDataDependency()
+  .defineStateDependency()
 ;
 
 export function makeViewController<Name extends string>(name: Name) {
@@ -188,8 +188,8 @@ export function makeViewController<Name extends string>(name: Name) {
   function getDependenciesDefinitionInterface<StoredState, Deps extends Dependencies<any, any, any>>
     (initialStoredState: StoredState): DependencyDefinitionInterface<Name, StoredState, Deps> {
       return {
-        defineDataDependency<Key extends string, Data>
-          (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<Record<Key, Data>, {}, {}>> {
+        defineStateDependency<Key extends string, T>
+          (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<Record<Key, T>, {}, {}>> {
             return makeControllerWithDepedencies(initialStoredState);
         },
         defineEventDependency<Key extends string, Payload>
@@ -320,7 +320,6 @@ export function makeViewController<Name extends string>(name: Name) {
         storedStateStream.next(nextState)
       }
     })
-
 
     const makeEvent = <Name extends string, Args>(name: Name, handler: EventHandler<FullState, StoredState, Args>): Event<Name, FullState, StoredState, Args> => {
       return {
