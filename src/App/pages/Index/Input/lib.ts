@@ -86,13 +86,17 @@ type ControllerWithName<Name extends string> = {
 }
 
 type ControllerWithStoredState<Name extends string, StoredState> =
-  DependencyDefinitionInterface<Name, StoredState, Dependencies<{}, {}, {}>>;
+  DependencyDefinitionInterface<Name, StoredState, Dependencies<{}, {}, {}>> &
+  EventsDefinitionInterface<Name, StoredState, {}, Dependencies<{}, {}, {}>>;
 
 type ControllerWithDerivedState<Name extends string, StoredState, FullState, Deps extends Dependencies<any, any, any>> =
   DerivedStateDefinitionInterface<Name, StoredState, FullState, Deps> & EventsDefinitionInterface<Name, StoredState, FullState, Deps>;
 
 type ControllerWithDependencies<Name extends string, StoredState, Deps extends Dependencies<any, any, any>> =
-  DependencyDefinitionInterface<Name, StoredState, Deps> & DerivedStateDefinitionInterface<Name, StoredState, {}, Deps>;
+  DependencyDefinitionInterface<Name, StoredState, Deps> &
+  DerivedStateDefinitionInterface<Name, StoredState, {}, Deps> &
+  EventsDefinitionInterface<Name, StoredState, StoredState, Deps>
+  ;
 
 // type ControllerWithDependencies<Name, StoredState, D, FullState> = {
 //   defineDerivedState<P extends string, S1, V>(
@@ -220,13 +224,16 @@ export function makeViewController<Name extends string>(name: Name) {
         defineEvents<EventList extends Array<Event<string, FullState, StoredState, any>>>(
           getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList
         ): FinalController<Name, FullState, Deps, EventEmitterMapOf<EventList>> {
-          return makeFinalController(initialStoredState, derivedStateDescription, getEvents)
+          return makeFinalController(initialStoredState, derivedStateDescription, getEvents);
         }
       };
     }
 
   function makeControllerWithStoredState<StoredState>(initialStoredState: StoredState): ControllerWithStoredState<Name, StoredState> {
-    return getDependenciesDefinitionInterface(initialStoredState);
+    return {
+      ...getDependenciesDefinitionInterface(initialStoredState),
+      ...getEventsDefinitionInterface(initialStoredState, []),
+    };
   }
 
   function makeContollerWithDerivedState<StoredState, FullState, Deps extends Dependencies<any, any, any>>(
@@ -247,6 +254,7 @@ export function makeViewController<Name extends string>(name: Name) {
     return {
       ...getDependenciesDefinitionInterface(initialStoredState),
       ...getDerivedStateDefinitionInterface(initialStoredState, []),
+      ...getEventsDefinitionInterface(initialStoredState, []),
     }
   }
 
