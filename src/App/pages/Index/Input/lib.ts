@@ -56,14 +56,14 @@ type Dependencies<State extends Record<string, any>, Events extends Record<strin
   view: View;
 }
 
-type DependencyDefinitionInterface<Name extends string, StoredState, Deps extends Dependencies<any, any, any>> = {
+type DependencyDefinitionInterface<Name extends string, StoredState, FullState, Deps extends Dependencies<any, any, any>> = {
   defineStateDependency<Key extends string, T>
-    (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<Record<Key, T>, {}, {}>>;
+    (): ControllerWithDependencies<Name, StoredState, FullState & Record<Key, T>, Deps & Dependencies<Record<Key, T>, {}, {}>>;
   // TODO payload could be empty
   defineEventDependency<Key extends string, Payload>
-    (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<{}, Record<Key, Payload>, {}>>;
+    (): ControllerWithDependencies<Name, StoredState, FullState, Deps & Dependencies<{}, Record<Key, Payload>, {}>>;
   defineViewDependency<Key extends string, Props = {}>
-    (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<{}, {}, Record<Key, Props>>>;
+    (): ControllerWithDependencies<Name, StoredState, FullState, Deps & Dependencies<{}, {}, Record<Key, Props>>>;
 }
 
 type DerivedStateDefinitionInterface<Name extends string, StoredState, FullState, Deps extends Dependencies<any, any, any>> = {
@@ -86,15 +86,15 @@ type ControllerWithName<Name extends string> = {
 }
 
 type ControllerWithStoredState<Name extends string, StoredState> =
-  DependencyDefinitionInterface<Name, StoredState, Dependencies<{}, {}, {}>> &
-  EventsDefinitionInterface<Name, StoredState, {}, Dependencies<{}, {}, {}>>;
+  DependencyDefinitionInterface<Name, StoredState, StoredState, Dependencies<{}, {}, {}>> &
+  EventsDefinitionInterface<Name, StoredState, StoredState, Dependencies<{}, {}, {}>>;
 
 type ControllerWithDerivedState<Name extends string, StoredState, FullState, Deps extends Dependencies<any, any, any>> =
   DerivedStateDefinitionInterface<Name, StoredState, FullState, Deps> & EventsDefinitionInterface<Name, StoredState, FullState, Deps>;
 
-type ControllerWithDependencies<Name extends string, StoredState, Deps extends Dependencies<any, any, any>> =
-  DependencyDefinitionInterface<Name, StoredState, Deps> &
-  DerivedStateDefinitionInterface<Name, StoredState, {}, Deps> &
+type ControllerWithDependencies<Name extends string, StoredState, FullState, Deps extends Dependencies<any, any, any>> =
+  DependencyDefinitionInterface<Name, StoredState, FullState, Deps> &
+  DerivedStateDefinitionInterface<Name, StoredState, FullState, Deps> &
   EventsDefinitionInterface<Name, StoredState, StoredState, Deps>
   ;
 
@@ -171,7 +171,8 @@ type S = {
 
 makeViewController('test')
   .defineStoredState<S>({ value: '' })
-  .defineStateDependency()
+  .defineStateDependency<'hello', number>()
+  .defineDerivedState('asd', [s => ])
   ;
 
 export function makeViewController<Name extends string>(name: Name) {
@@ -185,19 +186,19 @@ export function makeViewController<Name extends string>(name: Name) {
     }
   }
 
-  function getDependenciesDefinitionInterface<StoredState, Deps extends Dependencies<any, any, any>>
-    (initialStoredState: StoredState): DependencyDefinitionInterface<Name, StoredState, Deps> {
+  function getDependenciesDefinitionInterface<StoredState, FullState, Deps extends Dependencies<any, any, any>>
+    (initialStoredState: StoredState): DependencyDefinitionInterface<Name, StoredState, FullState, Deps> {
     return {
       defineStateDependency<Key extends string, T>
-        (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<Record<Key, T>, {}, {}>> {
+        (): ControllerWithDependencies<Name, StoredState, FullState & Record<Key, T>, Deps & Dependencies<Record<Key, T>, {}, {}>> {
         return makeControllerWithDepedencies(initialStoredState);
       },
       defineEventDependency<Key extends string, Payload>
-        (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<{}, Record<Key, Payload>, {}>> {
+        (): ControllerWithDependencies<Name, StoredState, FullState, Deps & Dependencies<{}, Record<Key, Payload>, {}>> {
         return makeControllerWithDepedencies(initialStoredState);
       },
       defineViewDependency<Key extends string, Props = {}>
-        (): ControllerWithDependencies<Name, StoredState, Deps & Dependencies<{}, {}, Record<Key, Props>>> {
+        (): ControllerWithDependencies<Name, StoredState, FullState, Deps & Dependencies<{}, {}, Record<Key, Props>>> {
         return makeControllerWithDepedencies(initialStoredState);
       },
     }
@@ -247,9 +248,9 @@ export function makeViewController<Name extends string>(name: Name) {
     };
   }
 
-  function makeControllerWithDepedencies<StoredState, Deps extends Dependencies<any, any, any>>(
+  function makeControllerWithDepedencies<StoredState, FullState, Deps extends Dependencies<any, any, any>>(
     initialStoredState: StoredState,
-  ): ControllerWithDependencies<Name, StoredState, Deps> {
+  ): ControllerWithDependencies<Name, StoredState, FullState, Deps> {
 
     return {
       ...getDependenciesDefinitionInterface(initialStoredState),
