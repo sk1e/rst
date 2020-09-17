@@ -1,5 +1,5 @@
 import { U } from 'ts-toolbelt';
-import { BehaviorSubject, Subject, Observable, of, defer, concat } from 'rxjs';
+import { BehaviorSubject, Subject, Observable, combineLatest } from 'rxjs';
 import * as o from 'rxjs/operators';
 import * as React from 'react';
 
@@ -23,7 +23,7 @@ type Event<Name extends string, FullState, StoredState, Args> = {
 }
 
 type EventNotification<T> = {
-  name: string;
+  eventName: string;
   payload: T;
 }
 
@@ -87,6 +87,7 @@ type ControllerWithName<Name extends string> = {
 
 type ControllerWithStoredState<Name extends string, StoredState> =
   DependencyDefinitionInterface<Name, StoredState, StoredState, Dependencies<{}, {}, {}>> &
+  DerivedStateDefinitionInterface<Name, StoredState, StoredState, Dependencies<{}, {}, {}>> &
   EventsDefinitionInterface<Name, StoredState, StoredState, Dependencies<{}, {}, {}>>;
 
 type ControllerWithDerivedState<Name extends string, StoredState, FullState, Deps extends Dependencies<any, any, any>> =
@@ -165,15 +166,14 @@ type DerivedStateDescription = {
   selector(...args: any[]): any;
 }
 
-type S = {
-  value: string;
-}
+// type S = {
+//   value: string;
+// }
 
-makeViewController('test')
-  .defineStoredState<S>({ value: '' })
-  .defineStateDependency<'hello', number>()
-  .defineDerivedState('asd', [s => ])
-  ;
+// makeViewController('test')
+//   .defineStoredState<S>({ value: '' })
+//   .defineStateDependency<'hello', number>()
+//   ;
 
 export function makeViewController<Name extends string>(name: Name) {
   return makeControllerWithName();
@@ -234,6 +234,7 @@ export function makeViewController<Name extends string>(name: Name) {
     return {
       ...getDependenciesDefinitionInterface(initialStoredState),
       ...getEventsDefinitionInterface(initialStoredState, []),
+      ...getDerivedStateDefinitionInterface(initialStoredState, []),
     };
   }
 
@@ -278,78 +279,109 @@ export function makeViewController<Name extends string>(name: Name) {
       view: {},
     } as any;
 
-    return {
-      getViewInterface() {
-        const transformers = derivedStateAcc.map(derivedStateDescription => {
-          const lastDependencies = derivedStateDescription.uses.map(() => Symbol('initial'));
-          return (dependentState: any) => {
-            const dependencies = derivedStateDescription.uses.map(f => f(dependentState));
-            // derivedStateDescription.uses
-            if (dependencies.some((x, index) => lastDependencies[index] !== x)) {
-              return {
-                ...dependentState,
-                [derivedStateDescription.property]: derivedStateDescription.selector(...dependencies),
-              };
-            }
+    const stateDependencies = Object.entries(dependencies.state);
 
-            return dependentState;
-          }
-        })
-        let initialFullState: null | FullState = null;
+    const storedStateStream = new BehaviorSubject(initialStoredState);
 
-        const getInitialFullState = (): FullState => {
-          if (initialFullState === null) {
-            initialFullState = transformers.reduce<FullState>((acc, f) => f(acc), initialStoredState as any)
-          }
-          return initialFullState;
-        };
+    const storedAndDependencyStateStream =
+      combineLatest([storedStateStream, ...stateDependencies.map(([_, observable]) => observable)])
+        .pipe(
+          o.map(([storedState, ...dependencyState]: any[]) => ({
+            ...storedState,
+            ...dependencyState.reduce((acc, x, index) => ({
+              ...acc,
+              [stateDependencies[index][0]]: x,
+            }), {}),
+          }))
+        )
 
-        const rawEventNotificationStream = new Subject<EventNotification<any>>();
-
-        const makeEvent = <Name extends string, Args>(name: Name, handler: EventHandler<FullState, StoredState, Args>): Event<Name, FullState, StoredState, Args> => {
+    const transformers = derivedStateAcc.map(derivedStateDescription => {
+      const lastDependencies = derivedStateDescription.uses.map(() => Symbol('initial'));
+      return (dependentState: any) => {
+        const dependencies = derivedStateDescription.uses.map(f => f(dependentState));
+        // derivedStateDescription.uses
+        if (dependencies.some((x, index) => lastDependencies[index] !== x)) {
           return {
-            name,
-            handler,
-            emit: (args: Args) => rawEventNotificationStream.next({ name, payload: args }),
+            ...dependentState,
+            [derivedStateDescription.property]: derivedStateDescription.selector(...dependencies),
           };
         }
 
-        const events = getEvents({ makeEvent });
-        const eventHanlders = events.reduce<Record<string, EventHandler<FullState, StoredState, any>>>((acc, x) => ({
-          ...acc,
-          [x.name]: x.handler,
-        }), {})
+        return dependentState;
+      }
+    })
 
-        const eventEmitters = events.reduce<EventEmitters>((acc, x) => ({ ...acc, [x.name]: x.emit }), {} as EventEmitters);
+
+    const fullStateStream = storedAndDependencyStateStream.pipe(
+      o.map(state => {
+        return transformers.reduce<FullState>((acc, f) => f(acc), state as any);
+      }));
+
+    const fullStateForHookStream = fullStateStream.pipe(o.skip(1));
+    const initialFullStateStream = fullStateStream.pipe(o.take(1));
+
+    let initialFullState: null | FullState = null;
+
+    const getInitialFullState = (): FullState => {
+      console.log('>> pre subscrbe');
+      initialFullStateStream.subscribe(state => {
+        console.log('>> in subscrbe');
+        initialFullState = state;
+      });
+
+      console.log('>> post subscrbe');
+
+      if (initialFullState === null) {
+        console.error('>> initial full state is not initialized');
+      }
+
+      return initialFullState as FullState;
+    };
+
+    // const fullStateStream = concat(
+    //   defer(() => of(getInitialFullState())),
+    //   storedStateStream.pipe(
+    //     o.skip(1),
+    //     o.map(state => {
+    //       return transformers.reduce<FullState>((acc, f) => f(acc), state as any);
+    //     }),
+    //   ));
+
+    const rawEventNotificationStream = new Subject<EventNotification<any>>();
+
+    const makeEvent = <Name extends string, Args>(name: Name, handler: EventHandler<FullState, StoredState, Args>): Event<Name, FullState, StoredState, Args> => {
+      return {
+        name,
+        handler,
+        emit: (args: Args) => rawEventNotificationStream.next({ eventName: name, payload: args }),
+      };
+    }
+
+    const events = getEvents({ makeEvent });
+    const eventHandlers = events.reduce<Record<string, EventHandler<FullState, StoredState, any>>>((acc, x) => ({
+      ...acc,
+      [x.name]: x.handler,
+    }), {})
+
+    const eventEmitters = events.reduce<EventEmitters>((acc, x) => ({ ...acc, [x.name]: x.emit }), {} as EventEmitters);
+
+    const eventNotificationWithFullStateStream = rawEventNotificationStream.pipe(o.withLatestFrom(fullStateStream));
+
+    eventNotificationWithFullStateStream.subscribe(([notification, state]) => {
+      const nextState = eventHandlers[notification.eventName](state, notification.payload);
+      if (nextState instanceof Observable) {
+        nextState.subscribe(storedStateStream)
+      } else {
+        storedStateStream.next(nextState)
+      }
+    });
+
+    return {
+      getViewInterface() {
         return {
           useState: () => {
-            const [state, setState] = React.useState<FullState>(getInitialFullState())
+            const [state, setState] = React.useState<FullState>(getInitialFullState)
             React.useEffect(() => {
-              const storedStateStream = new BehaviorSubject(initialStoredState);
-
-              const fullStateStream = concat(
-                defer(() => of(getInitialFullState())),
-                storedStateStream.pipe(
-                  o.skip(1),
-                  o.map(state => {
-                    return transformers.reduce<FullState>((acc, f) => f(acc), state as any);
-                  }),
-                ));
-
-              const fullStateForHookStream = fullStateStream.pipe(o.skip(1)); // skip initial state to put it to useState hook
-
-              const rawEventNotificationStream = new Subject<EventNotification<any>>();
-
-              const eventNotificationWithFullStateStream = rawEventNotificationStream.pipe(o.withLatestFrom(fullStateStream));
-
-              eventNotificationWithFullStateStream.subscribe(([notification, state]) => {
-                const nextState = eventHanlders[notification.name](state, notification.payload);
-                if (nextState instanceof Observable) {
-                  nextState.subscribe(storedStateStream)
-                } else {
-                  storedStateStream.next(nextState)
-                }
-              })
               fullStateForHookStream.subscribe(newState => setState(newState));
             });
             return state;
@@ -360,7 +392,13 @@ export function makeViewController<Name extends string>(name: Name) {
       getParentInterface() {
         return {
           name,
-          initializeDependencies: deps => { },
+          initializeDependencies: deps => {
+            dependencies = {
+              events: {...dependencies.events, ...deps.events},
+              state: {...dependencies.state, ...deps.state},
+              view: {...dependencies.view, ...deps.view},
+            } as any;
+          },
         }
       }
     }
