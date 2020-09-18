@@ -2,12 +2,12 @@ import { makeViewController } from './lib';
 
 type S = {
   value: string;
-}
+};
 
 // const c = makeStateController<S>({ value: 'privet', n: 1 })
 //   .defineDerivedState('len', [(x => x.value)])
 
-export const {useState, methods } = makeViewController('Input')
+export const { useState, methods } = makeViewController('Input')
   .defineStoredState<S>({value: 'privet' })
   .defineDerivedState(
     'valueLength',
