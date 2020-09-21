@@ -10,11 +10,68 @@ type ControllerViewInterface<State, Methods extends Record<string, (args: any) =
   useState(): State;
 }
 
-type ControllerParentInterface<Name extends string, ChildrenDeps, Deps extends Dependencies<any, any, any>> = {
+// type E = 'Hello';
+
+// type T = `Privet ${E}.${E}`
+// type F = `em ${T}`
+// const e: F = 'em Privet Hello.Hello'
+
+export type ControllerParentInterface<Name extends string, Children, Deps extends Dependencies<any, any, any>, DescendantsDeps> = {
   name: Name;
-  initializeDependencies(dependencies: ChildrenDeps & Deps): void;
+  getDescendantDependencies(): DescendantsDeps;
+  initializeDependencies(dependencies: GetChildrenDependencies<Children> & Deps): void;
 }
 
+type DependenciesAreEmpty<Deps extends Dependencies<any, any, any>> =
+  keyof Deps['events'] | keyof Deps['state'] | keyof Deps['view'] extends never ? 1 : 0
+
+// type E = keyof {}
+
+export type GetDescendantsDependencies<Children, Acc = {}> =
+  Children extends []
+  ? Acc
+  : Children extends [ControllerParentInterface<infer ChildName, any, infer OwnDeps, infer ChildDescendantDeps>, ...infer XS]
+    ? keyof ChildDescendantDeps extends never
+      ? DependenciesAreEmpty<OwnDeps> extends 1
+        ? GetDescendantsDependencies<XS, Acc>
+        : GetDescendantsDependencies<XS, Acc & Record<ChildName, OwnDeps>>
+      : keyof ChildDescendantDeps extends string
+        ? GetDescendantsDependencies<
+           XS,
+           Acc &
+           { [K in keyof ChildDescendantDeps as `${ChildName}.${K}`]: ChildDescendantDeps[K] } &
+           DependenciesAreEmpty<OwnDeps> extends 1
+             ? {}
+             : Record<ChildName, OwnDeps>
+           >
+        : boolean
+    : number;
+
+// export type GetDescendantsDependencies<Children, Acc = {}> =
+//   Children extends []
+//   ? {}
+//   : Children;
+
+// type GetDescendantsDependencies<Children, Acc = {}> =
+//   Children extends []
+//   ? Acc
+//   : Children extends [ControllerParentInterface<infer ChildName, any, any, infer ChildDescendantDeps>, ...infer XS]
+//     ? keyof ChildDescendantDeps extends never
+//       ? GetDescendantsDependencies<XS, Acc>
+//       : keyof ChildDescendantDeps extends string
+//         ? GetDescendantsDependencies<XS, Acc & { [K in keyof ChildDescendantDeps as `${ChildName}.${K}`]: ChildDescendantDeps[K] }>
+//         : boolean
+//     : number;
+
+
+// type GetDescendantsDependencies<Children, Acc = {}> =
+//   Children extends []
+//   ? Acc
+//   : Children extends [ControllerParentInterface<infer Name, any, any, infer DescendantDeps>, ...infer XS]
+//     ? keyof DescendantDeps extends string
+//       ? GetDescendantsDependencies<XS, Acc & WithPrefix<keyof DescendantDeps, DescendantDeps, Name>>
+//       : never
+//     : never;
 
 type Event<Name extends string, FullState, StoredState, Args> = {
   name: Name;
@@ -35,18 +92,7 @@ type GetEventsArguments<FullState, StoredState> = {
 
 type EventHandler<FullState, StoredState, Args> = (state: FullState, args: Args) => StoredState | Observable<StoredState>;
 
-type FinalController<
-  Name extends string,
-  FullState,
-  ChildrenDeps,
-  Deps extends Dependencies<any, any, any>,
-  EventEmitterMap extends Record<string, (args: any) => void>
-  > = {
-    getViewInterface(): ControllerViewInterface<FullState, EventEmitterMap>;
-    getParentInterface(): ControllerParentInterface<Name, ChildrenDeps, Deps>;
-  }
-
-type Dependencies<State extends Record<string, any>, Events extends Record<string, any>, View> = {
+export type Dependencies<State extends Record<string, any>, Events extends Record<string, any>, View> = {
   state: State;
   events: Events;
   view: View;
@@ -54,69 +100,198 @@ type Dependencies<State extends Record<string, any>, Events extends Record<strin
 
 // === Definition interface types ===
 
+
 type ChildrenDefinitionInterface<Name extends string, StoredState> = {
-  defineChildren<Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>>>>(
+  defineChildren<Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>, any>>>(
     chlidren: Children
-  ): ControllerWithChildren<Name, StoredState, Dependencies<{}, {}, {}> & GetChildrenDependencies<Children>>;
+  ): ControllerWithChildren<Name, StoredState, Children extends Array<infer T> ? U.ListOf<T> : never>;
 }
 
-type DependencyDefinitionInterface<Name extends string, StoredState, FullState, ChildrenDeps, Deps extends Dependencies<any, any, any>> = {
+type DependencyDefinitionInterface<Name extends string, StoredState, FullState, Children, Deps extends Dependencies<any, any, any>> = {
   defineStateDependency<Key extends string, T>
-    (): ControllerWithDependencies<Name, StoredState, FullState & Record<Key, T>, ChildrenDeps, Deps & Dependencies<Record<Key, T>, {}, {}>>;
+    (): ControllerWithDependencies<Name, StoredState, FullState & Record<Key, T>, Children, Deps & Dependencies<Record<Key, T>, {}, {}>>;
   // TODO payload could be empty
   defineEventDependency<Key extends string, Payload>
-    (): ControllerWithDependencies<Name, StoredState, FullState, ChildrenDeps, Deps & Dependencies<{}, Record<Key, Payload>, {}>>;
+    (): ControllerWithDependencies<Name, StoredState, FullState, Children, Deps & Dependencies<{}, Record<Key, Payload>, {}>>;
   defineViewDependency<Key extends string, Props = {}>
-    (): ControllerWithDependencies<Name, StoredState, FullState, ChildrenDeps, Deps & Dependencies<{}, {}, Record<Key, Props>>>;
+    (): ControllerWithDependencies<Name, StoredState, FullState, Children, Deps & Dependencies<{}, {}, Record<Key, Props>>>;
 }
 
-type DerivedStateDefinitionInterface<Name extends string, StoredState, FullState, ChildrenDeps, Deps extends Dependencies<any, any, any>> = {
+type DerivedStateDefinitionInterface<Name extends string, StoredState, FullState, Children, Deps extends Dependencies<any, any, any>> = {
   defineDerivedState<P extends string, S1, V>(
     property: P, uses: [Use<FullState, S1>], selector: (a1: S1) => V
-  ): ControllerWithDerivedState<Name, StoredState, FullState & Record<P, V>, ChildrenDeps, Deps>;
+  ): ControllerWithDerivedState<Name, StoredState, FullState & Record<P, V>, Children, Deps>;
   defineDerivedState<P extends string, S1, S2, V>(
     property: P, uses: [Use<FullState, S1>, Use<FullState, S1>], selector: (a1: S1, a2: S2) => V
-  ): ControllerWithDerivedState<Name, StoredState, FullState & Record<P, V>, ChildrenDeps, Deps>;
+  ): ControllerWithDerivedState<Name, StoredState, FullState & Record<P, V>, Children, Deps>;
 }
 
-type EventsDefinitionInterface<Name extends string, StoredState, FullState, ChildrenDeps, Deps extends Dependencies<any, any, any>> = {
+type EventsDefinitionInterface<Name extends string, StoredState, FullState, Children, Deps extends Dependencies<any, any, any>> = {
   defineEvents<EventList extends Array<Event<string, FullState, StoredState, any>>>(
     getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList
-  ): FinalController<Name, FullState, ChildrenDeps, Deps, EventEmitterMapOf<EventList>>;
+  ): ControllerWithEvents<Name, FullState, Children, Deps, EventEmitterMapOf<EventList>>;
 }
 
+type ChildrenDependenciesResolverArguments<FullState> = {
+  state: FullState;
+}
+
+type CollectResolvedDependencies<Deps extends Partial<Dependencies<any, any, any>>, Keys = U.ListOf<keyof Deps>, Acc extends any[] = []> =
+  Keys extends []
+   ? Acc
+   : Keys extends [infer X, ...infer XS]
+     ? X extends keyof Deps
+       ? CollectResolvedDependencies<Deps, XS, [...Acc, ...CollectResolvedSubDependencies<Deps[X], X>]>
+       : never
+     : never
+
+type CollectResolvedSubDependencies<Rec, K, Keys=U.ListOf<keyof Rec>, Acc extends any[]=[]> =
+  Keys extends []
+   ? Acc
+   : Keys extends [infer X, ...infer XS]
+     ? CollectResolvedSubDependencies<Rec, K, XS, [...Acc, [K, X]]>
+     : never;
+
+type ResolvedDependenciesTuples<DescDeps> = {
+  [K in keyof DescDeps]: CollectResolvedDependencies<DescDeps[K]>;
+}
+
+type RemoveResolved<Deps, Resolved, Acc=Deps> =
+  Resolved extends []
+    ? Acc
+    : Resolved extends [[infer P1, infer P2], ...infer XS]
+      ? P1 extends keyof Acc
+        ? P2 extends keyof Acc[P1]
+          ? keyof Omit<Acc[P1], P2> extends never
+            ? RemoveResolved<Deps, XS, Omit<Acc, P1>>
+            : RemoveResolved<Deps, XS, Omit<Acc, P1> & Record<P1, Omit<Acc[P1], P2>>>
+        : never
+      : never
+    : never
+
+// type RMap = ResolvedDependenciesTuples<ResolvedMap>;
+// type E = Omit
+// type Rm = RemoveResolved<DescDeps['Input'], RMap['Input']>
+
+// const q: Rm = {
+//   events: {e2: 'ou'}
+
+// };
+
+// type R = RemoveDependencies<DescDeps, ResolvedMap>;
+
+// const q: R = {
+//   Input: {events: {e2: 'ou'}, state: {}}
+// }
+
+type RemoveDependencies<
+  DescDeps,
+  ResolvedDepsWithMap,
+  ResolvedDepsWithTuples = ResolvedDependenciesTuples<ResolvedDepsWithMap>
+> = {
+  [K in keyof DescDeps]: K extends keyof ResolvedDepsWithTuples ? RemoveResolved<DescDeps[K], ResolvedDepsWithTuples[K]> : never
+}
+
+type ClearEmptyDeps<Deps, Keys=U.ListOf<keyof Deps>, Acc={}> =
+  Keys extends []
+    ? Acc
+    : Keys extends [infer X, ...infer XS]
+      ? X extends keyof Deps
+        ? keyof Deps[X] extends never
+          ? ClearEmptyDeps<Deps, XS, Acc>
+          : ClearEmptyDeps<Deps, XS, Acc & Record<X, Deps[X]>>
+        : never
+      : never
+
+
+type A = Dependencies<{a: 1}, {}, {b: 2}>
+
+const q: ClearEmptyDeps<A> = {
+  state
+}
+
+type ChildrenDependenciesResolverInterface<
+  Name extends string,
+FullState,
+Children,
+Deps extends Dependencies<any ,any ,any>,
+EventEmitterMap extends Record<string, (args: any) => void>,
+DescendantDependencies,
+  > = {
+  defineChildrenDependenciesResolver<T extends ClearEmptyDeps<DescendantDependencies>>(
+    resolver: (args: ChildrenDependenciesResolverArguments<FullState>) => T
+  ): FinalController<Name, FullState, Children, Deps, EventEmitterMap, RemoveDependencies<DescendantDependencies, T>>
+}
+
+type ControllerPublicInterface<
+  Name extends string,
+  FullState,
+  Children,
+  Deps extends Dependencies<any, any, any>,
+  EventEmitterMap extends Record<string, (args: any) => void>,
+DescendantDeps
+  > = {
+    getViewInterface(): ControllerViewInterface<FullState, EventEmitterMap>;
+    getParentInterface(): ControllerParentInterface<Name, Children, Deps, DescendantDeps>;
+  }
+
 //  === Partial controller types ===
+//
+type FinalController<
+  Name extends string,
+  FullState,
+  Children,
+  Deps extends Dependencies<any, any, any>,
+  EventEmitterMap extends Record<string, (args: any) => void>,
+  DescendantDeps
+  > = ControllerPublicInterface<Name, FullState, Children, Deps, EventEmitterMap, DescendantDeps>;
+
+type ControllerWithEvents<
+  Name extends string,
+  FullState,
+  Children,
+  Deps extends Dependencies<any, any, any>,
+  EventEmitterMap extends Record<string, (args: any) => void>,
+  DescendantDependencies = GetDescendantsDependencies<Children>
+  > =
+  ChildrenDependenciesResolverInterface<Name, FullState, Children, Deps, EventEmitterMap, DescendantDependencies> &
+  ControllerPublicInterface<Name, FullState, Children, Deps, EventEmitterMap, DescendantDependencies>;
+
+// type ControllerWithResolvedDependencies<Name> =
 
 type ControllerWithName<Name extends string> = {
   defineStoredState<StoredState>(initialStoredState: StoredState): ControllerWithStoredState<Name, StoredState>;
 }
 
 type ControllerWithStoredState<Name extends string, StoredState> =
-  DependencyDefinitionInterface<Name, StoredState, StoredState, {}, Dependencies<{}, {}, {}>> &
-  DerivedStateDefinitionInterface<Name, StoredState, StoredState, {}, Dependencies<{}, {}, {}>> &
-  EventsDefinitionInterface<Name, StoredState, StoredState, {}, Dependencies<{}, {}, {}>> &
+  DependencyDefinitionInterface<Name, StoredState, StoredState, [], Dependencies<{}, {}, {}>> &
+  DerivedStateDefinitionInterface<Name, StoredState, StoredState, [], Dependencies<{}, {}, {}>> &
+  EventsDefinitionInterface<Name, StoredState, StoredState, [], Dependencies<{}, {}, {}>> &
   ChildrenDefinitionInterface<Name, StoredState>
 ;
 
-type ControllerWithChildren<Name extends string, StoredState, ChildrenDeps> =
-  DependencyDefinitionInterface<Name, StoredState, StoredState, ChildrenDeps, Dependencies<{}, {}, {}>> &
-  DerivedStateDefinitionInterface<Name, StoredState, StoredState, ChildrenDeps, Dependencies<{}, {}, {}>>
+type ControllerWithChildren<Name extends string, StoredState, Children> =
+  DependencyDefinitionInterface<Name, StoredState, StoredState, Children, Dependencies<{}, {}, {}>> &
+  DerivedStateDefinitionInterface<Name, StoredState, StoredState, Children, Dependencies<{}, {}, {}>> &
+  EventsDefinitionInterface<Name, StoredState, StoredState, Children, Dependencies<{}, {}, {}> &
+  ChildrenDependenciesResolverInterface<Name, StoredState, Children, Dependencies<{}, {}, {}>, {}, GetDescendantsDependencies<Children>>>
+;
 
-type ControllerWithDerivedState<Name extends string, StoredState, FullState, ChildrenDeps, Deps extends Dependencies<any, any, any>> =
-  DerivedStateDefinitionInterface<Name, StoredState, FullState, ChildrenDeps, Deps> &
-  EventsDefinitionInterface<Name, StoredState, FullState, ChildrenDeps, Deps>;
+type ControllerWithDerivedState<Name extends string, StoredState, FullState, Children, Deps extends Dependencies<any, any, any>> =
+  DerivedStateDefinitionInterface<Name, StoredState, FullState, Children, Deps> &
+  EventsDefinitionInterface<Name, StoredState, FullState, Children, Deps>;
 
-type ControllerWithDependencies<Name extends string, StoredState, FullState, ChildrenDeps, Deps extends Dependencies<any, any, any>> =
-  DependencyDefinitionInterface<Name, StoredState, FullState, ChildrenDeps, Deps> &
-  DerivedStateDefinitionInterface<Name, StoredState, FullState, ChildrenDeps, Deps> &
-  EventsDefinitionInterface<Name, StoredState, StoredState, ChildrenDeps, Deps>
+type ControllerWithDependencies<Name extends string, StoredState, FullState, Children, Deps extends Dependencies<any, any, any>> =
+  DependencyDefinitionInterface<Name, StoredState, FullState, Children, Deps> &
+  DerivedStateDefinitionInterface<Name, StoredState, FullState, Children, Deps> &
+  EventsDefinitionInterface<Name, StoredState, StoredState, Children, Deps>
   ;
 
 type GetChildrenDependencies<Children, Acc = {}> =
   Children extends []
     ? Acc
-    : Children extends [ControllerParentInterface<infer Name, infer ChildrenDeps, infer OwnDeps>, ...infer XS]
-      ? GetChildrenDependencies<XS, Acc & Record<Name, ChildrenDeps & OwnDeps>>
+    : Children extends [ControllerParentInterface<infer Name, infer GrandChildren, infer OwnDeps, any>, ...infer XS]
+      ? GetChildrenDependencies<XS, Acc & Record<Name, GrandChildren & OwnDeps>>
       : never;
 
 type _EventMapOf<T, Acc = {}> =
@@ -160,25 +335,24 @@ export function makeViewController<Name extends string>(name: Name) {
 
   function getDependenciesDefinitionInterface<
     StoredState,
-  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>>>,
+  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>, any>>,
   FullState,
-  ChildrenDeps,
   Deps extends Dependencies<any, any, any>
     >(
     initialStoredState: StoredState,
     children: Children,
-  ): DependencyDefinitionInterface<Name, StoredState, FullState, ChildrenDeps, Deps> {
+  ): DependencyDefinitionInterface<Name, StoredState, FullState, Children, Deps> {
     return {
       defineStateDependency<Key extends string, T>
-        (): ControllerWithDependencies<Name, StoredState, FullState & Record<Key, T>, ChildrenDeps, Deps & Dependencies<Record<Key, T>, {}, {}>> {
+        (): ControllerWithDependencies<Name, StoredState, FullState & Record<Key, T>, Children, Deps & Dependencies<Record<Key, T>, {}, {}>> {
         return makeControllerWithDepedencies(initialStoredState, children);
       },
       defineEventDependency<Key extends string, Payload>
-        (): ControllerWithDependencies<Name, StoredState, FullState, ChildrenDeps, Deps & Dependencies<{}, Record<Key, Payload>, {}>> {
+        (): ControllerWithDependencies<Name, StoredState, FullState, Children, Deps & Dependencies<{}, Record<Key, Payload>, {}>> {
         return makeControllerWithDepedencies(initialStoredState, children);
       },
       defineViewDependency<Key extends string, Props = {}>
-        (): ControllerWithDependencies<Name, StoredState, FullState, ChildrenDeps, Deps & Dependencies<{}, {}, Record<Key, Props>>> {
+        (): ControllerWithDependencies<Name, StoredState, FullState, Children, Deps & Dependencies<{}, {}, Record<Key, Props>>> {
         return makeControllerWithDepedencies(initialStoredState, children);
       },
     }
@@ -187,18 +361,17 @@ export function makeViewController<Name extends string>(name: Name) {
 
   function getDerivedStateDefinitionInterface<
     StoredState,
-  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>>>,
+  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>, any>>,
   FullState,
-  ChildrenDeps,
   Deps extends Dependencies<any, any, any>>(
     initialStoredState: StoredState,
     children: Children,
     derivedStateDescription: DerivedStateDescription[],
-  ): DerivedStateDefinitionInterface<Name, StoredState, FullState, ChildrenDeps, Deps> {
+  ): DerivedStateDefinitionInterface<Name, StoredState, FullState, Children, Deps> {
     return {
       defineDerivedState<P extends string, V>(
         property: P, uses: Array<Use<FullState, any>>, selector: (...args: any[]) => V
-      ): ControllerWithDerivedState<Name, StoredState, FullState & Record<P, V>, ChildrenDeps, Deps> {
+      ): ControllerWithDerivedState<Name, StoredState, FullState & Record<P, V>, Children, Deps> {
         return makeContollerWithDerivedState(
           initialStoredState,
           children,
@@ -210,18 +383,17 @@ export function makeViewController<Name extends string>(name: Name) {
 
   function getEventsDefinitionInterface<
     StoredState,
-  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>>>,
+  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>, any>>,
   FullState,
-  ChildrenDeps,
   Deps extends Dependencies<any, any, any>>(
     initialStoredState: StoredState,
     children: Children,
     derivedStateDescription: DerivedStateDescription[]
-  ): EventsDefinitionInterface<Name, StoredState, FullState, ChildrenDeps, Deps> {
+  ): EventsDefinitionInterface<Name, StoredState, FullState, Children, Deps> {
     return {
       defineEvents<EventList extends Array<Event<string, FullState, StoredState, any>>>(
         getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList
-      ): FinalController<Name, FullState, ChildrenDeps, Deps, EventEmitterMapOf<EventList>> {
+      ): ControllerWithEvents<Name, FullState, Children, Deps, EventEmitterMapOf<EventList>> {
         return makeFinalController(initialStoredState, children, derivedStateDescription, getEvents);
       }
     };
@@ -232,9 +404,9 @@ export function makeViewController<Name extends string>(name: Name) {
     initialStoredState: StoredState
   ): ChildrenDefinitionInterface<Name, StoredState> {
     return {
-      defineChildren<Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>>>>(
+      defineChildren<Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>, any>>>(
         children: Children,
-      ): ControllerWithChildren<Name, StoredState, Dependencies<{}, {}, {}> & GetChildrenDependencies<Children>> {
+      ): ControllerWithChildren<Name, StoredState, Children> {
         return makeControllerWithChildren(initialStoredState, children);
       }
     }
@@ -242,15 +414,15 @@ export function makeViewController<Name extends string>(name: Name) {
 
   function makeControllerWithChildren<
     StoredState,
-  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>>>,
-  Deps extends Dependencies<any, any, any>
+  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>, any>>,
     >(
     initialStoredState: StoredState,
     children: Children,
-  ): ControllerWithChildren<Name, StoredState, Deps> {
+  ): ControllerWithChildren<Name, StoredState, Children> {
     return {
       ...getDerivedStateDefinitionInterface(initialStoredState, children, []),
       ...getDependenciesDefinitionInterface(initialStoredState, children),
+      ...getEventsDefinitionInterface(initialStoredState, children),
     }
   }
 
@@ -266,14 +438,13 @@ export function makeViewController<Name extends string>(name: Name) {
   function makeContollerWithDerivedState<
     StoredState,
   FullState,
-  ChildrenDeps,
+  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>, any>>,
   Deps extends Dependencies<any, any, any>,
-  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>>>
     >(
     initialStoredState: StoredState,
     children: Children,
     derivedStateDescription: DerivedStateDescription[],
-  ): ControllerWithDerivedState<Name, StoredState, FullState, ChildrenDeps, Deps> {
+  ): ControllerWithDerivedState<Name, StoredState, FullState, Children, Deps> {
 
     return {
       ...getDerivedStateDefinitionInterface(initialStoredState, children, derivedStateDescription),
@@ -283,13 +454,12 @@ export function makeViewController<Name extends string>(name: Name) {
 
   function makeControllerWithDepedencies<
     StoredState,
-  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>>>,
+  Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>, any>>,
   FullState,
-  ChildrenDeps,
   Deps extends Dependencies<any, any, any>>(
     initialStoredState: StoredState,
       children: Children,
-  ): ControllerWithDependencies<Name, StoredState, FullState, ChildrenDeps, Deps> {
+  ): ControllerWithDependencies<Name, StoredState, FullState, Children, Deps> {
 
     return {
       ...getDependenciesDefinitionInterface(initialStoredState, children),
@@ -301,9 +471,8 @@ export function makeViewController<Name extends string>(name: Name) {
 
   function makeFinalController<
     StoredState,
-     Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>>>,
+     Children extends Array<ControllerParentInterface<string, any, Dependencies<any, any, any>, any>>,
     FullState,
-    ChildrenDeps,
     Deps extends Dependencies<any, any, any>,
     EventEmitters extends Record<string, (args: any) => void>,
     EventList extends Array<Event<string, FullState, StoredState, any>>
@@ -312,7 +481,7 @@ export function makeViewController<Name extends string>(name: Name) {
     children: Children,
     derivedStateAcc: DerivedStateDescription[],
     getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
-  ): FinalController<Name, FullState, ChildrenDeps, Deps, EventEmitters> {
+  ): ControllerWithEvents<Name, FullState, Children, Deps, EventEmitters> {
 
     console.log('>> children', children);
 

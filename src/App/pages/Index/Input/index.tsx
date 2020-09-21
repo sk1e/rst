@@ -10,7 +10,7 @@ export function Input() {
   return (
     <input
       type="text"
-      value={state.value}
+      value={state.fullValue}
       onChange={(e) => {
         // console.log('>> new value', e.target.value);
         methods.setValue({ newValue: e.target.value })
