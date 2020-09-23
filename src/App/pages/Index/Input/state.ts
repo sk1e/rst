@@ -1,4 +1,4 @@
-import { makeViewController, GetDescendantsDependencies, ControllerParentInterface, Dependencies } from './lib';
+import { makeViewController, ControllerParentInterface, GetStateDescendantsDependencies } from './lib';
 
 type S = {
   value: string;
@@ -79,37 +79,36 @@ const contr2ParentInterface  = contr2.getParentInterface();
 // type W = GetDescendantsDependencies<[]>
 // type Q = GetDescendantsDependencies<[typeof parentInterface]>
 
+// type Chd = [typeof contr1]
 
-type Chd = [typeof contr1]
+// export type GetDeps<Children, Acc = {}> =
+//   Children extends []
+//     ? 1
+//     : Children extends [ControllerParentInterface<infer ChildName, any, infer OwnDeps, infer ChildDescendantDeps>, ...infer XS]
+//       ? keyof ChildDescendantDeps extends never
+//         ? 2
+//         : 3
+//       : 4
 
-export type GetDeps<Children, Acc = {}> =
-  Children extends []
-    ? 1
-    : Children extends [ControllerParentInterface<infer ChildName, any, infer OwnDeps, infer ChildDescendantDeps>, ...infer XS]
-      ? keyof ChildDescendantDeps extends never
-        ? 2
-        : 3
-      : 4
+// type T = GetDeps<Chd>
 
-type T = GetDeps<Chd>
-
-export type _GetDescendantsDependencies<Children, Acc = {}> =
-  Children extends []
-  ? Acc
-  : Children extends [ControllerParentInterface<infer ChildName, any, infer OwnDeps, infer ChildDescendantDeps>, ...infer XS]
-    ? keyof ChildDescendantDeps extends never
-      ? _GetDescendantsDependencies<XS, Acc>
-      : keyof ChildDescendantDeps extends string
-        ? _GetDescendantsDependencies<
-           XS,
-           Acc &
-           { [K in keyof ChildDescendantDeps as `${ChildName}.${K}`]: ChildDescendantDeps[K] } &
-           DependenciesAreEmpty<OwnDeps> extends 1
-             ? {}
-             : Record<ChildName, OwnDeps>
-           >
-        : boolean
-    : number;
+// export type _GetDescendantsDependencies<Children, Acc = {}> =
+//   Children extends []
+//   ? Acc
+//   : Children extends [ControllerParentInterface<infer ChildName, any, infer OwnDeps, infer ChildDescendantDeps>, ...infer XS]
+//     ? keyof ChildDescendantDeps extends never
+//       ? _GetDescendantsDependencies<XS, Acc>
+//       : keyof ChildDescendantDeps extends string
+//         ? _GetDescendantsDependencies<
+//            XS,
+//            Acc &
+//            { [K in keyof ChildDescendantDeps as `${ChildName}.${K}`]: ChildDescendantDeps[K] } &
+//            DependenciesAreEmpty<OwnDeps> extends 1
+//              ? {}
+//              : Record<ChildName, OwnDeps>
+//            >
+//         : boolean
+//     : number;
 
 
 type DependenciesAreEmpty<Deps extends Dependencies<any, any, any>> =
@@ -129,10 +128,24 @@ const parent = makeViewController('Parent')
   .defineStoredState<P>({numericValue: 2})
   .defineChildren([contr1ParentInterface, contr2ParentInterface])
   .defineEvents(() => [])
-  .defineChildrenDependenciesResolver(() => ({
-
+  .defineStateDependenciesResolver(() => ({
+    AnotherInput: {address: 'asd'},
   }))
 ;
 
+const parentParentInterface = parent.getParentInterface();
 
-export const {methods, useState} = contr.getViewInterface();
+type F = typeof parentParentInterface extends ControllerParentInterface<any, any, any, any, any, infer T> ? T : never
+
+type Chd = [typeof parentParentInterface]
+
+type A = GetStateDescendantsDependencies<Chd>
+
+const grandParent = makeViewController('GrandParent')
+  .defineStoredState<P>({numericValue: 2})
+  .defineChildren([parentParentInterface])
+  .defineStateDependenciesResolver(() => ({
+    'Parent.Input': {name: 'asd'},
+  }))
+
+export const {methods, useState} = contr1.getViewInterface();
