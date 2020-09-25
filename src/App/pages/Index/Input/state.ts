@@ -128,10 +128,14 @@ const parent = makeViewController('Parent')
   .defineStoredState<P>({numericValue: 2})
   .defineChildren([contr1ParentInterface, contr2ParentInterface])
   .defineEvents(() => [])
+  // .defineStateDependenciesResolver
   .defineStateDependenciesResolver(() => ({
     AnotherInput: {address: 'asd'},
   }))
+
 ;
+
+// type R = Exclude<1 | 2 | 3, 1>
 
 const parentParentInterface = parent.getParentInterface();
 
@@ -145,7 +149,8 @@ const grandParent = makeViewController('GrandParent')
   .defineStoredState<P>({numericValue: 2})
   .defineChildren([parentParentInterface])
   .defineStateDependenciesResolver(() => ({
-    'Parent.Input': {name: 'asd'},
+    // 'Parent.Input': {name: 'asd'},
   }))
+
 
 export const {methods, useState} = contr1.getViewInterface();
