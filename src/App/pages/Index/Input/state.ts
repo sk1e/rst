@@ -129,10 +129,11 @@ const parent = makeViewController('Parent')
   .defineChildren([contr1ParentInterface, contr2ParentInterface])
   .defineEvents(() => [])
   // .defineStateDependenciesResolver
+  .defineEventDependenciesResolver()
   .defineStateDependenciesResolver(() => ({
-    AnotherInput: {address: 'asd'},
+    AnotherInput: {address: 1}
   }))
-
+  .defineViewDependenciesResolver()
 ;
 
 // type R = Exclude<1 | 2 | 3, 1>

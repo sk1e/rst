@@ -24,6 +24,7 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "downlevelIteration": true,
+    "skipLibCheck": true
   },
   "include": [
     "src/**/*",
