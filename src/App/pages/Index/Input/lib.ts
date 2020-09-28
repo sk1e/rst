@@ -1,7 +1,8 @@
 import { U } from 'ts-toolbelt';
-import { BehaviorSubject, Subject, Observable, combineLatest } from 'rxjs';
+import { BehaviorSubject, Subject, Observable, combineLatest, of } from 'rxjs';
 import * as o from 'rxjs/operators';
 import * as React from 'react';
+
 type Use<State, T> = (state: State) => T;
 
 type ControllerViewInterface<State, Methods extends Record<string, (args: any) => void>> = {
@@ -10,7 +11,7 @@ type ControllerViewInterface<State, Methods extends Record<string, (args: any) =
 }
 
 type DependencyResolvers = Partial<{
-  state(args: any): any;
+  state(args: StateDependenciesResolverArguments<StoredState, DerivedState, StateDeps, Children>): any;
   events(args: any): any;
 }>
 
@@ -19,7 +20,8 @@ export type ControllerParentInterface<
   > = {
     name: Name;
     getDescendantDependencies(): { state: StateDescendantsDeps, events: EventDescendantDeps };
-    initializeDependencies(dependencies: { state: StateDeps, events: EventDeps }): void;
+    initializeStateDependencies(deps: Partial<StateDeps>): void;
+    initializeEventDependencies(deps: Partial<EventDeps>): void;
   }
 
 export type GetStateDescendantsDependencies<Children, Deps = _GetStateDescendantsDependencies<Children>> =
@@ -278,15 +280,6 @@ type DerivedStateDescription = {
   selector(...args: any[]): any;
 }
 
-// type S = {
-//   value: string;
-// }
-
-// makeViewController('test')
-//   .defineStoredState<S>({ value: '' })
-//   .defineStateDependency<'hello', number>()
-//   ;
-
 // === Implementation ===
 
 export function makeViewController<Name extends string>(name: Name) {
@@ -445,177 +438,218 @@ export function makeViewController<Name extends string>(name: Name) {
     dependencyResolvers: DependencyResolvers,
   ): ControllerPublicInterface<
       Name, FullState, StateDeps, EventDeps, DerivedState, EventEmitterMap, StateDescendantDeps, EventDescendantDeps
-    > {
+  > {
 
-    console.log('>> children', children);
+      console.log('>> unused deps', children, eventDependencyKeys, dependencyResolvers);
 
-    let dependencies: Deps = {
-      events: {},
-      state: {},
-    } as any;
+      let stateDependencyStreams = stateDependencyKeys
+        .reduce<Record<string, Observable<any> | null>>((acc, x) => ({...acc, [x]: null}), {});
 
-    // const stateDependencies = Object.entries(dependencies.state);
+      const derivedStateStreams = derivedStateAcc
+        .reduce<Record<string, Observable<any> | null>>((acc, x) => ({...acc, [x.property]: null}), {});
 
-    const stateDependencies = stateDependenciesKeys
-      .reduce<Record<string, Subject<any>>>((acc, x) => ({...acc, [x]: new Subject()}), {})
+      const storedStateStream = new BehaviorSubject(initialStoredState);
 
-    const storedStateStream = new BehaviorSubject(initialStoredState);
+      const storedStateKeys = Object.keys(initialStoredState);
 
-    const storedAndDependencyStateStream =
-      combineLatest([storedStateStream, ...stateDependencies.map(([_, observable]) => observable)])
-        .pipe(
-          o.map(([storedState, ...dependencyState]: any[]) => ({
+      function getUseStream(use: Use<any, any>) {
+        const path: string[] = use(getPathTrackingProxy()).getPath;
+        const first = path[0];
+
+        if (storedStateKeys.includes(first)) {
+          return storedStateStream.pipe(
+            o.map(state => use(state)),
+            o.distinctUntilChanged(),
+          );
+        }
+
+        if (derivedStateAcc.some(x => x.property === first)) {
+          return derivedStateStreams[first];
+        }
+
+        if (stateDependencyKeys.includes(first)) {
+          if (stateDependencyStreams[first] === null) {
+            console.error('could not convert use to stream, dependency', first, 'is not initialized');
+            return of(null);
+          }
+          return stateDependencyStreams[first];
+        }
+
+        console.error('could not convert use to stream, unknown use path');
+
+        return of(null);
+      }
+
+      function getFullStateStream(): Observable<FullState> {
+        const dependencyStreamEntries = Object.entries(stateDependencyStreams);
+
+        if (dependencyStreamEntries.some(([_, stream]) => stream === null)) {
+          const unmetDeps = dependencyStreamEntries
+            .filter(([_, stream]) => stream === null)
+            .map((([key]) => key));
+          console.error('state dependencies were not fulfilled:', unmetDeps)
+          return of(null as any);
+        }
+
+        derivedStateAcc.forEach(x => {
+          const streams = x.uses.map(getUseStream);
+
+          derivedStateStreams[x.property] = combineLatest(streams).pipe(
+            o.map(args => x.selector(...args))
+          )
+        });
+
+        const derivedStateStreamEntries = Object.entries(derivedStateStreams)
+        const derivedStateStream = combineLatest(derivedStateStreamEntries.map(x => x[1])).pipe(
+          o.map(stateArray => stateArray.reduce(
+            (acc, x, index) => ({
+              ...acc,
+              [derivedStateStreamEntries[index][0]]: x
+            }), {}))
+        );
+
+        return combineLatest(
+          [storedStateStream, derivedStateStream, ...dependencyStreamEntries.map(x => x[1]!)]
+        ).pipe(
+          o.map(([storedState, derivedState, ...dependencyState]) => ({
             ...storedState,
+            ...derivedState,
             ...dependencyState.reduce((acc, x, index) => ({
               ...acc,
-              [stateDependencies[index][0]]: x,
+              [dependencyStreamEntries[index][0]]: x,
             }), {}),
-          }))
-        )
+          })));
+      }
 
-    const transformers = derivedStateAcc.map(derivedStateDescription => {
-      const lastDependencies = derivedStateDescription.uses.map(() => Symbol('initial'));
-      return (dependentState: any) => {
-        const dependencies = derivedStateDescription.uses.map(f => f(dependentState));
-        // derivedStateDescription.uses
-        if (dependencies.some((x, index) => lastDependencies[index] !== x)) {
-          return {
-            ...dependentState,
-            [derivedStateDescription.property]: derivedStateDescription.selector(...dependencies),
-          };
+      let fullStateStream: Observable<FullState> | null = null;
+      let fullStateForHookStream: Observable<FullState> | null = null;
+
+      let initialFullState: null | FullState = null;
+
+      const getInitialFullState = (): FullState => {
+        fullStateStream = getFullStateStream();
+        fullStateForHookStream = fullStateStream.pipe(o.skip(1))
+
+        configureEventEmitters(fullStateStream);
+        const initialFullStateStream = fullStateStream.pipe(o.take(1));
+
+        console.log('>> pre subscrbe');
+        initialFullStateStream.subscribe(state => {
+          console.log('>> in subscrbe');
+          initialFullState = state;
+        });
+
+        console.log('>> post subscrbe');
+
+        if (initialFullState === null) {
+          console.error('>> initial full state is not initialized');
         }
 
-        return dependentState;
-      }
-    })
-
-
-    const fullStateStream = storedAndDependencyStateStream.pipe(
-      o.map(state => {
-        return transformers.reduce<FullState>((acc, f) => f(acc), state as any);
-      }));
-
-    const fullStateForHookStream = fullStateStream.pipe(o.skip(1));
-    const initialFullStateStream = fullStateStream.pipe(o.take(1));
-
-    let initialFullState: null | FullState = null;
-
-    const getInitialFullState = (): FullState => {
-      console.log('>> pre subscrbe');
-      initialFullStateStream.subscribe(state => {
-        console.log('>> in subscrbe');
-        initialFullState = state;
-      });
-
-      console.log('>> post subscrbe');
-
-      if (initialFullState === null) {
-        console.error('>> initial full state is not initialized');
-      }
-
-      return initialFullState as FullState;
-    };
-
-    // const fullStateStream = concat(
-    //   defer(() => of(getInitialFullState())),
-    //   storedStateStream.pipe(
-    //     o.skip(1),
-    //     o.map(state => {
-    //       return transformers.reduce<FullState>((acc, f) => f(acc), state as any);
-    //     }),
-    //   ));
-
-    const rawEventNotificationStream = new Subject<EventNotification<any>>();
-
-    const makeEvent = <Name extends string, Args>(name: Name, handler: EventHandler<FullState, StoredState, Args>): Event<Name, FullState, StoredState, Args> => {
-      return {
-        name,
-        handler,
-        emit: (args: Args) => rawEventNotificationStream.next({ eventName: name, payload: args }),
+        return initialFullState as FullState;
       };
-    }
 
-    const events = getEvents({ makeEvent });
-    const eventHandlers = events.reduce<Record<string, EventHandler<FullState, StoredState, any>>>((acc, x) => ({
-      ...acc,
-      [x.name]: x.handler,
-    }), {})
+      const rawEventNotificationStream = new Subject<EventNotification<any>>();
 
-    const eventEmitters = events.reduce<EventEmitterMap>((acc, x) => ({ ...acc, [x.name]: x.emit }), {} as EventEmitterMap);
-
-    const eventNotificationWithFullStateStream = rawEventNotificationStream.pipe(o.withLatestFrom(fullStateStream));
-
-    eventNotificationWithFullStateStream.subscribe(([notification, state]) => {
-      const nextState = eventHandlers[notification.eventName](state, notification.payload);
-      if (nextState instanceof Observable) {
-        nextState.subscribe(storedStateStream)
-      } else {
-        storedStateStream.next(nextState)
-      }
-    });
-
-    return {
-      getViewInterface() {
-        return {
-          useState: () => {
-            const [state, setState] = React.useState<FullState>(getInitialFullState)
-            React.useEffect(() => {
-              fullStateForHookStream.subscribe(newState => setState(newState));
-            });
-            return state;
-          },
-          methods: eventEmitters,
-        };
-      },
-      getParentInterface() {
+      const makeEvent = <Name extends string, Args>(
+        name: Name, handler: EventHandler<FullState, StoredState, Args>
+      ): Event<Name, FullState, StoredState, Args> => {
         return {
           name,
-          initializeDependencies: deps => {
-            dependencies = {
-              events: { ...dependencies.events, ...deps.events },
-              state: { ...dependencies.state, ...deps.state },
-            } as any;
-          },
-        }
+          handler,
+          emit: (args: Args) => rawEventNotificationStream.next({ eventName: name, payload: args }),
+        };
+      }
+
+      const events = getEvents({ makeEvent });
+
+      const eventEmitters = events.reduce<EventEmitterMap>((acc, x) => ({ ...acc, [x.name]: x.emit }), {} as EventEmitterMap);
+
+      function configureEventEmitters(fullStateStream: Observable<FullState>): void {
+        const eventHandlers = events.reduce<Record<string, EventHandler<FullState, StoredState, any>>>((acc, x) => ({
+          ...acc,
+          [x.name]: x.handler,
+        }), {})
+
+        const eventNotificationWithFullStateStream = rawEventNotificationStream.pipe(o.withLatestFrom(fullStateStream));
+
+        eventNotificationWithFullStateStream.subscribe(([notification, state]) => {
+          const nextState = eventHandlers[notification.eventName](state, notification.payload);
+          if (nextState instanceof Observable) {
+            nextState.subscribe(storedStateStream)
+          } else {
+            storedStateStream.next(nextState)
+          }
+        });
+      }
+
+      dependencyResolvers.events{}
+
+      return {
+        getViewInterface() {
+          return {
+            methods: eventEmitters,
+            useState: () => {
+              const [state, setState] = React.useState<FullState>(getInitialFullState);
+
+              React.useEffect(() => {
+                fullStateForHookStream!.subscribe(newState => setState(newState));
+              });
+              return state;
+            },
+          };
+        },
+
+        getParentInterface() {
+          return {
+            name,
+            initializeStateDependencies: deps => {
+              Object.assign(stateDependencyStreams, deps);
+            },
+            initializeEventDependencies: () => null as any,
+            getDescendantDependencies: null as any,
+          }
+        },
+        getDerivedState: null as any,
+
+
       }
     }
-  }
 
   function makeControllerWithResolver<
     StoredState, Children, FullState, StateDeps, EventDeps,  DerivedState,
-    EventEmitterMap extends Record<string, (args: any) => void>, StateDescendantDeps, EventDescendantDeps,
-    EventList extends Array<Event<string, FullState, StoredState, any>>,
-    UndefinedResolver extends 'defineStateDependenciesResolver' | 'defineEventDependenciesResolver'  =
-   'defineStateDependenciesResolver' | 'defineEventDependenciesResolver'
+  EventEmitterMap extends Record<string, (args: any) => void>, StateDescendantDeps, EventDescendantDeps,
+  EventList extends Array<Event<string, FullState, StoredState, any>>,
+  UndefinedResolver extends 'defineStateDependenciesResolver' | 'defineEventDependenciesResolver'  =
+    'defineStateDependenciesResolver' | 'defineEventDependenciesResolver'
     >(
-    initialStoredState: StoredState,
-    children: Children,
-    stateDependencyKeys: string[],
-    eventDependencyKeys: string[],
-    derivedStateAcc: DerivedStateDescription[],
-    getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
-    resolvers: DependencyResolvers,
-  ): ControllerWithDependenciesResolver<Name, StoredState, FullState, Children, StateDeps, EventDeps,
-      DerivedState, EventEmitterMap, StateDescendantDeps, EventDescendantDeps, UndefinedResolver> {
-    return {
-      ...getStateDependenciesResolverDefinitionInterface(
-        initialStoredState, children, stateDependencyKeys, eventDependencyKeys, derivedStateAcc, getEvents, resolvers
-      ),
-      ...getPublicInterface(
-        initialStoredState, children, stateDependencyKeys, eventDependencyKeys, derivedStateAcc, getEvents, resolvers,
-      )
+      initialStoredState: StoredState,
+      children: Children,
+      stateDependencyKeys: string[],
+      eventDependencyKeys: string[],
+      derivedStateAcc: DerivedStateDescription[],
+      getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
+      resolvers: DependencyResolvers,
+    ): ControllerWithDependenciesResolver<Name, StoredState, FullState, Children, StateDeps, EventDeps,
+  DerivedState, EventEmitterMap, StateDescendantDeps, EventDescendantDeps, UndefinedResolver> {
+      return {
+        ...getStateDependenciesResolverDefinitionInterface(
+          initialStoredState, children, stateDependencyKeys, eventDependencyKeys, derivedStateAcc, getEvents, resolvers
+        ) as any, // TODO fix
+        ...getPublicInterface(
+          initialStoredState, children, stateDependencyKeys, eventDependencyKeys, derivedStateAcc, getEvents, resolvers,
+        )
+      }
     }
-  }
 
   function makeControllerWithChildren<StoredState, Children>(
-    initialStoredState: StoredState,
-    children: Children extends Array<infer T> ? U.ListOf<T> : never,
-  ): ControllerWithChildren<Name, StoredState, Children extends Array<infer T> ? U.ListOf<T> : never> {
+      initialStoredState: StoredState,
+      children: Children extends Array<infer T> ? U.ListOf<T> : never,
+    ): ControllerWithChildren<Name, StoredState, Children extends Array<infer T> ? U.ListOf<T> : never> {
     return {
       ...getDerivedStateDefinitionInterface(initialStoredState, children, [], [], []),
       ...getDependenciesDefinitionInterface(initialStoredState, children, [], []),
       ...getEventsDefinitionInterface(initialStoredState, children, [], [], []),
-      ...getStateDependenciesResolverDefinitionInterface(initialStoredState, children, [], [], [], () => [], {}),
+      ...getStateDependenciesResolverDefinitionInterface(initialStoredState, children, [], [], [], () => [], {}) as any, // TODO fix
     };
   }
 
@@ -663,8 +697,8 @@ export function makeViewController<Name extends string>(name: Name) {
 
   function makeControllerWithEvents<
     StoredState, Children, FullState, StateDeps, EventDeps, DerivedState, EventEmitters extends Record<string, (args: any) => void>,
-    EventList extends Array<Event<string, FullState, StoredState, any>>
-  >(
+  EventList extends Array<Event<string, FullState, StoredState, any>>
+    >(
     initialStoredState: StoredState,
     children: Children,
     stateDependencyKeys: string[],
@@ -672,14 +706,29 @@ export function makeViewController<Name extends string>(name: Name) {
     derivedStateAcc: DerivedStateDescription[],
     getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
   ): ControllerWithEvents<Name, StoredState, FullState, Children, StateDeps, EventDeps, DerivedState,  EventEmitters> {
-    return {
-      ...getStateDependenciesResolverDefinitionInterface(
-        initialStoredState, children, stateDependencyKeys, eventDependencyKeys, derivedStateAcc, getEvents, {},
-      ),
-      ...getPublicInterface(
-        initialStoredState, children, stateDependencyKeys, eventDependencyKeys, derivedStateAcc, getEvents, {},
-      )
-    }
+      return {
+        ...getStateDependenciesResolverDefinitionInterface(
+          initialStoredState, children, stateDependencyKeys, eventDependencyKeys, derivedStateAcc, getEvents, {},
+        ) as any, // TODO fix
+        ...getPublicInterface(
+          initialStoredState, children, stateDependencyKeys, eventDependencyKeys, derivedStateAcc, getEvents, {},
+        )
+      }
 
-  }
+    }
+}
+
+type PathTracker = {
+  getPath: string[]
+}
+
+function getPathTrackingProxy(pathAcc: string[] = []): PathTracker {
+  return new Proxy<PathTracker>({ getPath: [] }, {
+    get(_, prop, ) {
+      // TODO replace with symbol
+      return prop === 'getPath'
+        ? pathAcc
+        : getPathTrackingProxy([...pathAcc, prop as string])
+    }
+  });
 }
