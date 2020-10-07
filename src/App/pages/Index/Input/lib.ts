@@ -1,5 +1,5 @@
 import { U } from 'ts-toolbelt';
-import { BehaviorSubject, Subject, Observable, combineLatest, of } from 'rxjs';
+import { BehaviorSubject, Subject, Observable, combineLatest, Subscriber } from 'rxjs';
 import * as o from 'rxjs/operators';
 import * as React from 'react';
 
@@ -10,7 +10,7 @@ type ControllerViewInterface<State, Methods extends Record<string, (args: any) =
   useState(): State;
 }
 
-type DependencyResolvers = Partial<{
+type DependencyResolvers<StoredState, DerivedState, StateDeps, Children> = Partial<{
   state(args: StateDependenciesResolverArguments<StoredState, DerivedState, StateDeps, Children>): any;
   events(args: any): any;
 }>
@@ -197,10 +197,8 @@ type ControllerPublicInterface<
     >;
   }
 
-// type E = Exclude<'asd', 'asd'> extends never ? 1 : 2
+ // === Partial controller types ===
 
-//  === Partial controller types ===
-//
 type ControllerWithDependenciesResolver<
     Name extends string, StoredState, FullState, Children, StateDeps, EventDeps, DerivedState,
     EventEmitterMap extends Record<string, (args: any) => void>, StateDescendantDeps, EventDescendantDeps,
@@ -393,7 +391,7 @@ export function makeViewController<Name extends string>(name: Name) {
     eventDependencyKeys: string[],
     derivedStateAcc: DerivedStateDescription[],
     getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
-    resolvers: DependencyResolvers,
+    resolvers: DependencyResolvers<any, any, any, any>,
     // TODO fix desc deps (last arg)
   ): DependenciesResolverDefinitionInterface<
     Name, StoredState, FullState, Children, StateDeps, EventDeps, DerivedState, {}, StateDescendantDeps,
@@ -435,117 +433,245 @@ export function makeViewController<Name extends string>(name: Name) {
     eventDependencyKeys: string[],
     derivedStateAcc: DerivedStateDescription[],
     getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
-    dependencyResolvers: DependencyResolvers,
+    dependencyResolvers: DependencyResolvers<any, any, any, any>,
   ): ControllerPublicInterface<
       Name, FullState, StateDeps, EventDeps, DerivedState, EventEmitterMap, StateDescendantDeps, EventDescendantDeps
   > {
-
       console.log('>> unused deps', children, eventDependencyKeys, dependencyResolvers);
-
-      let stateDependencyStreams = stateDependencyKeys
-        .reduce<Record<string, Observable<any> | null>>((acc, x) => ({...acc, [x]: null}), {});
-
-      const derivedStateStreams = derivedStateAcc
-        .reduce<Record<string, Observable<any> | null>>((acc, x) => ({...acc, [x.property]: null}), {});
-
-      const storedStateStream = new BehaviorSubject(initialStoredState);
 
       const storedStateKeys = Object.keys(initialStoredState);
 
-      function getUseStream(use: Use<any, any>) {
-        const path: string[] = use(getPathTrackingProxy()).getPath;
-        const first = path[0];
+      type AbstractMultipleDependency = {
+        stateKeys: string[]
+      };
 
-        if (storedStateKeys.includes(first)) {
-          return storedStateStream.pipe(
-            o.map(state => use(state)),
-            o.distinctUntilChanged(),
-          );
-        }
+      type FullStateDependency = AbstractMultipleDependency & {
+        kind: 'full-state';
+      };
 
-        if (derivedStateAcc.some(x => x.property === first)) {
-          return derivedStateStreams[first];
-        }
+      type StoredAndDerivedStateDependency = AbstractMultipleDependency & {
+        kind: 'stored-and-derived';
+      };
 
-        if (stateDependencyKeys.includes(first)) {
-          if (stateDependencyStreams[first] === null) {
-            console.error('could not convert use to stream, dependency', first, 'is not initialized');
-            return of(null);
-          }
-          return stateDependencyStreams[first];
-        }
+      type DerivedStateSumDependency = AbstractMultipleDependency & {
+        kind: 'derived-state-sum';
+      };
 
-        console.error('could not convert use to stream, unknown use path');
+      type DerivedStateDependency = AbstractMultipleDependency & {
+        kind: 'derived-state';
+        dependentStateDescription: DerivedStateDescription;
+      };
 
-        return of(null);
+      type IntermediateSingleDependency = {
+        kind: 'intermediate-single';
+        path: string[];
+        stateKey: string;
+      };
+
+      type Dependency =
+        | FullStateDependency
+        | StoredAndDerivedStateDependency
+        | DerivedStateSumDependency
+        | DerivedStateDependency
+        | IntermediateSingleDependency;
+
+      function getDependencyStateKeys(x: Dependency): string[] {
+        return x.kind === 'intermediate-single'
+          ? [x.stateKey]
+          : x.stateKeys;
       }
 
-      function getFullStateStream(): Observable<FullState> {
-        const dependencyStreamEntries = Object.entries(stateDependencyStreams);
+      const predefinedStateKeys = {
+        fullState: ':fullState:',
+        storedAndDerivedState: ':stored-and-derived-state:',
+        derivedState: ':derivedState:',
+        storedState: ':storedState:',
+      };
 
-        if (dependencyStreamEntries.some(([_, stream]) => stream === null)) {
-          const unmetDeps = dependencyStreamEntries
-            .filter(([_, stream]) => stream === null)
-            .map((([key]) => key));
-          console.error('state dependencies were not fulfilled:', unmetDeps)
-          return of(null as any);
-        }
+      const stateKeyToDependencyMap: Record<string, Dependency> = {
+        [predefinedStateKeys.fullState]: { kind: 'full-state', stateKeys: [predefinedStateKeys.storedAndDerivedState, ...stateDependencyKeys] },
+        [predefinedStateKeys.storedAndDerivedState]: { kind: 'stored-and-derived', stateKeys: [predefinedStateKeys.storedState, predefinedStateKeys.derivedState] },
+        [predefinedStateKeys.derivedState]: { kind: 'derived-state-sum', stateKeys: derivedStateAcc.map(x => x.property) },
+        ...derivedStateAcc.reduce((acc: Record<string, DerivedStateDependency>, x): Record<string, DerivedStateDependency> => {
+          const keys = x.uses.map(use => {
+            const path: string[] = use(getPathTrackingProxy()).getPath;
+            return path.join('.');
+          })
+          return {
+            ...acc,
+            [x.property]: {
+              kind: 'derived-state',
+              dependentStateDescription: x,
+              stateKeys: keys,
+            },
+          };
+        }, {}),
+        ...derivedStateAcc.reduce((acc, x) => {
+          return x.uses.reduce((acc2: Record<string, IntermediateSingleDependency>, use): Record<string, IntermediateSingleDependency> => {
+            const path: string[] = use(getPathTrackingProxy()).getPath;
+            const firstKey = path[0];
+            const stateKey = path.join('.');
+            return storedStateKeys.includes(firstKey)
+           ? {...acc2, [stateKey]: { kind: 'intermediate-single', stateKey: predefinedStateKeys.storedState, path }}
+            : path.length > 1
+              ? { ...acc2, [stateKey]: { kind: 'intermediate-single', stateKey: firstKey, path, }}
+              : acc2;
+          }, acc);
+        }, {}),
+      }
 
-        derivedStateAcc.forEach(x => {
-          const streams = x.uses.map(getUseStream);
+      const dependencyStateKeyToDependentStateKeyMap: Record<string, string[]> = Object.entries(stateKeyToDependencyMap)
+        .reduce((acc, [holderKey, dependency]) =>
+          getDependencyStateKeys(dependency).reduce((acc2: Record<string, string[]>, x) => ({
+            ...acc2,
+            [x]: [...(acc2[x] || []), holderKey],
+          }), acc), { [predefinedStateKeys.fullState]: [] as string[] });
 
-          derivedStateStreams[x.property] = combineLatest(streams).pipe(
-            o.map(args => x.selector(...args))
-          )
+      const stateKeyToDependencyEmitterMap: Record<string, Subscriber<[string, Observable<any>]>> = {};
+      const stateKeyToStreamMap: Record<string, Observable<any>> = {};
+
+      Object.entries(stateKeyToDependencyMap).map(([stateKey, dependency]) => makeStream(stateKey, dependency))
+
+      console.log('>> stateKeyToDependencyMap', stateKeyToDependencyMap)
+      console.log('>> dependencyStateKeyToDependentStateKeyMap', dependencyStateKeyToDependentStateKeyMap)
+
+      function onStateStreamReceive(key: string, stream: Observable<any>) {
+        stateKeyToStreamMap[key] = stream;
+        dependencyStateKeyToDependentStateKeyMap[key].forEach(x => {
+          stateKeyToDependencyEmitterMap[x].next([key, stream])
         });
-
-        const derivedStateStreamEntries = Object.entries(derivedStateStreams)
-        const derivedStateStream = combineLatest(derivedStateStreamEntries.map(x => x[1])).pipe(
-          o.map(stateArray => stateArray.reduce(
-            (acc, x, index) => ({
-              ...acc,
-              [derivedStateStreamEntries[index][0]]: x
-            }), {}))
-        );
-
-        return combineLatest(
-          [storedStateStream, derivedStateStream, ...dependencyStreamEntries.map(x => x[1]!)]
-        ).pipe(
-          o.map(([storedState, derivedState, ...dependencyState]) => ({
-            ...storedState,
-            ...derivedState,
-            ...dependencyState.reduce((acc, x, index) => ({
-              ...acc,
-              [dependencyStreamEntries[index][0]]: x,
-            }), {}),
-          })));
       }
 
-      let fullStateStream: Observable<FullState> | null = null;
-      let fullStateForHookStream: Observable<FullState> | null = null;
+      function makeStream(stateKey: string, dependency: Dependency) {
+        let dependencyStreamEmitter: Subscriber<[string, Observable<any>]> | null = null;
+        const streamOfDependencyStreams = new Observable<[string, Observable<any>]>(emit => dependencyStreamEmitter = emit);
 
-      let initialFullState: null | FullState = null;
+        const dependenciesNumber = getDependencyStateKeys(dependency).length;
+
+        switch (dependency.kind) {
+          case 'full-state': {
+            streamOfDependencyStreams.pipe(
+              o.take(dependenciesNumber),
+              o.toArray()
+            ).subscribe(keyStreamPairs => {
+              const storedAndDerivedKeyIndex = keyStreamPairs.findIndex(x => x[0] === predefinedStateKeys.storedAndDerivedState);
+              if (storedAndDerivedKeyIndex === -1) {
+                console.error('no stored and dervied state in full state dependencies');
+              } else {
+                const storedAndDerivedStateStream = keyStreamPairs[storedAndDerivedKeyIndex][1];
+                const keyStreamPairsForExternalDependencyState = [
+                  ...keyStreamPairs.slice(0, storedAndDerivedKeyIndex),
+                  ...keyStreamPairs.slice(storedAndDerivedKeyIndex + 1, keyStreamPairs.length)
+                ];
+
+                onStateStreamReceive(stateKey, combineLatest([
+                  storedAndDerivedStateStream,
+                  ...keyStreamPairsForExternalDependencyState.map(x => x[1])
+                ]).pipe(
+                  o.map(([storedAndDerived, ...external]) =>
+                    external.reduce((acc, x, index) => ({
+                      ...acc,
+                      [keyStreamPairsForExternalDependencyState[index][0]]: x,
+                    }), storedAndDerived))))
+              }
+            });
+
+            break;
+          }
+
+          case 'stored-and-derived': {
+            streamOfDependencyStreams.pipe(
+              o.take(2),
+              o.toArray()
+            ).subscribe(([keyStreamPairX, keyStreamPairY]) => {
+              onStateStreamReceive(stateKey, combineLatest([keyStreamPairX[1], keyStreamPairY[1]]).pipe(
+                o.map(([x, y]) => ({...x, ...y})),
+              ));
+            });
+
+            break;
+          }
+
+          case 'derived-state-sum': {
+            streamOfDependencyStreams.pipe(
+              o.take(dependenciesNumber),
+              o.toArray(),
+            ).subscribe(keyStreamPairs => {
+              onStateStreamReceive(stateKey, combineLatest(keyStreamPairs.map(x => x[1])).pipe(
+                o.map(ys => ys.reduce((acc, y, index) => ({
+                  ...acc,
+                  [keyStreamPairs[index][0]]: y,
+                }), {}))
+              ))
+            });
+
+            break;
+          }
+
+          case 'derived-state': {
+            streamOfDependencyStreams.pipe(
+              o.take(dependenciesNumber),
+              o.toArray(),
+            ).subscribe(keyStreamPairs => {
+              const { dependentStateDescription } = dependency;
+
+              const useKeys = dependentStateDescription.uses.map(use => use(getPathTrackingProxy()).getPath);
+              const orderedKeyStreamPairs = keyStreamPairs.sort(([key1], [key2]) => {
+                const indexOf1 = useKeys.indexOf(key1);
+                const indexOf2 = useKeys.indexOf(key2)
+
+                return indexOf1 > indexOf2
+                  ? 1
+                  : indexOf1 < indexOf2
+                  ? -1
+                  : 0;
+              });
+
+              onStateStreamReceive(stateKey, combineLatest(orderedKeyStreamPairs.map(x => x[1])).pipe(
+                o.map(args => dependentStateDescription.selector(...args))
+              ));
+            });
+
+            break;
+          }
+
+          case 'intermediate-single': {
+            streamOfDependencyStreams.subscribe(([_, dependencyStream]) => {
+              onStateStreamReceive(stateKey, dependencyStream.pipe(
+                o.map(state => getPropertyByPath(dependency.path, state)),
+                o.distinctUntilChanged(),
+              ));
+            });
+
+            break;
+          }
+        }
+
+        stateKeyToDependencyEmitterMap[stateKey] = dependencyStreamEmitter!;
+      }
 
       const getInitialFullState = (): FullState => {
-        fullStateStream = getFullStateStream();
-        fullStateForHookStream = fullStateStream.pipe(o.skip(1))
+        let initialFullState: null | FullState = null;
 
-        configureEventEmitters(fullStateStream);
-        const initialFullStateStream = fullStateStream.pipe(o.take(1));
-
-        console.log('>> pre subscrbe');
-        initialFullStateStream.subscribe(state => {
-          console.log('>> in subscrbe');
-          initialFullState = state;
-        });
-
-        console.log('>> post subscrbe');
-
-        if (initialFullState === null) {
-          console.error('>> initial full state is not initialized');
+        const fullStateStream = stateKeyToStreamMap[predefinedStateKeys.fullState];
+        if (fullStateStream === undefined) {
+          console.error('stream was not initialized');
+          // TODO return reasonable defaults
+          return null as any;
         }
 
-        return initialFullState as FullState;
+        configureEventEmitters(fullStateStream);
+
+        fullStateStream.pipe(o.take(1)).subscribe(state => {
+            initialFullState = state as FullState;
+          });
+
+        if (initialFullState === null) {
+          console.error('initial state was not initialized');
+          return null as any;
+        }
+
+        return initialFullState;
       };
 
       const rawEventNotificationStream = new Subject<EventNotification<any>>();
@@ -582,7 +708,9 @@ export function makeViewController<Name extends string>(name: Name) {
         });
       }
 
-      dependencyResolvers.events{}
+      const storedStateStream = new BehaviorSubject(initialStoredState);
+
+      onStateStreamReceive(predefinedStateKeys.storedState, storedStateStream);
 
       return {
         getViewInterface() {
@@ -592,8 +720,12 @@ export function makeViewController<Name extends string>(name: Name) {
               const [state, setState] = React.useState<FullState>(getInitialFullState);
 
               React.useEffect(() => {
-                fullStateForHookStream!.subscribe(newState => setState(newState));
-              });
+                const fullStateStream = stateKeyToStreamMap[predefinedStateKeys.fullState];
+                if (fullStateStream !== undefined) {
+                  fullStateStream.pipe(o.skip(1))
+                    .subscribe(newState => setState(newState));
+                }
+              }, []);
               return state;
             },
           };
@@ -603,7 +735,7 @@ export function makeViewController<Name extends string>(name: Name) {
           return {
             name,
             initializeStateDependencies: deps => {
-              Object.assign(stateDependencyStreams, deps);
+              return deps as any;
             },
             initializeEventDependencies: () => null as any,
             getDescendantDependencies: null as any,
@@ -628,7 +760,7 @@ export function makeViewController<Name extends string>(name: Name) {
       eventDependencyKeys: string[],
       derivedStateAcc: DerivedStateDescription[],
       getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
-      resolvers: DependencyResolvers,
+      resolvers: DependencyResolvers<any, any, any, any>,
     ): ControllerWithDependenciesResolver<Name, StoredState, FullState, Children, StateDeps, EventDeps,
   DerivedState, EventEmitterMap, StateDescendantDeps, EventDescendantDeps, UndefinedResolver> {
       return {
@@ -694,7 +826,6 @@ export function makeViewController<Name extends string>(name: Name) {
     }
   }
 
-
   function makeControllerWithEvents<
     StoredState, Children, FullState, StateDeps, EventDeps, DerivedState, EventEmitters extends Record<string, (args: any) => void>,
   EventList extends Array<Event<string, FullState, StoredState, any>>
@@ -716,6 +847,13 @@ export function makeViewController<Name extends string>(name: Name) {
       }
 
     }
+}
+
+function getPropertyByPath(path: string[], obj: Record<string, any>): any {
+  const property = obj[path[0]];
+  return path.length === 1
+    ? property
+    : getPropertyByPath(path.slice(1), property);
 }
 
 type PathTracker = {

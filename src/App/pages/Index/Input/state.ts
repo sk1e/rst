@@ -7,15 +7,15 @@ type S = {
 const contr1 = makeViewController('Input')
   .defineStoredState<S>({value: 'privet' })
   // .defineStateDependency<'name', string>('name')
-  .defineDerivedState(
-    'fullValue',
-    [
-      // state => state.name,
-      state => state.value,
-    ],
-    // (name, value) => `${value} ${name}`
-    (value) => `${value} full`
-  )
+  // .defineDerivedState(
+  //   'fullValue',
+  //   [
+  //     // state => state.name,
+  //     state => state.value,
+  //   ],
+  //   // (name, value) => `${value} ${name}`
+  //   (value) => `${value} full`
+  // )
   .defineDerivedState(
     'valueLength',
     [state => state.value],
