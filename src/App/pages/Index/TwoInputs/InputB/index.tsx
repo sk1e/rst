@@ -2,18 +2,18 @@ import * as React from 'react';
 
 import { useState, methods } from './state';
 
-export function Input() {
+export function InputB() {
   const state = useState();
 
-  console.log('>> state', state);
+  console.log('>> state of B', state);
 
-  return (
+  return state && (
     <input
       type="text"
-      value={state.fullValue}
+      value={state.value}
       onChange={(e) => {
         // console.log('>> new value', e.target.value);
         methods.setValue({ newValue: e.target.value })
       }} />
-  )
+  );
 }

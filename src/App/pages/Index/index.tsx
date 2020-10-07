@@ -1,13 +1,11 @@
 import * as React from 'react';
 
-import { Input } from './Input';
+import { TwoInputs } from './TwoInputs';
 
 export function Index() {
   return (
     <div>
-      <div>Index page</div>
-      <div>Hello World</div>
-      <Input />
+      <TwoInputs />
     </div>
   )
 }
