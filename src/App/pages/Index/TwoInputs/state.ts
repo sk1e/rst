@@ -1,39 +1,18 @@
 import { makeViewController } from 'rst';
 
-import { parentInterfaceA } from './InputA/state';
-import { parentInterfaceB } from './InputB/state';
+import { InputA } from './InputA';
+import { InputB } from './InputB';
 
 type S = { value: string };
 
 const twoInputs = makeViewController('TwoInputs')
   .defineStoredState<S>({ value: 'fake' })
-  .defineChildren([parentInterfaceA, parentInterfaceB])
-  // .defineDerivedState(
-  //   'valueLength',
-  //   [state => state.value],
-  //   (value) => value.length,
-  // )
-  // .defineDerivedState(
-  //   'halfOfValueLength',
-  //   [state => state.valueLength],
-  //   x => x / 2,
-  // )
-  .defineEvents(({ makeEvent }) => {
-    const setValue = makeEvent(
-      'setValue',
-      (state, { newValue }: { newValue: string }): S =>
-        ({ ...state, value: newValue })
-    );
+  .defineChildren([InputA, InputB])
+  .defineStateDependenciesResolver(tree => ({
+    'InputA': { label: tree.InputB.value },
+    'InputB': { label: tree.InputA.value },
+  }))
+  ;
 
-    return [setValue];
-  })
- .defineStateDependenciesResolver(tree => ({
-   'InputA': { label: tree.InputB.value },
-   'InputB': { label: tree.InputA.value },
- }))
-
-
-  // .defineStateDependenciesResolver(tree => tree)
-;
-
-export const { methods, useState } = twoInputs.getViewInterface();
+export const { methods, useState, views } = twoInputs.getViewInterface();
+export const parentInterface = twoInputs.getParentInterface();

@@ -27,6 +27,5 @@ const inputB = makeViewController('InputB')
     return [setValue];
   });
 
-
 export const { methods, useState } = inputB.getViewInterface();
-export const parentInterfaceB = inputB.getParentInterface();
+export const parentInterface = inputB.getParentInterface();
