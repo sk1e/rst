@@ -12,7 +12,11 @@ const twoInputs = makeViewController('TwoInputs')
     'InputA': { label: tree.InputB.value },
     'InputB': { label: tree.InputA.value },
   }))
-  ;
+  .defineEventDependenciesResolver(tree => ({
+    'InputA': { setOtherInputValue: tree.setValue as any }
+  }))
+  .getPublicInterface();
+
 
 export const { methods, useState, views } = twoInputs.getViewInterface();
 export const parentInterface = twoInputs.getParentInterface();

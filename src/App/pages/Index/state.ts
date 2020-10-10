@@ -28,7 +28,7 @@ const twoInputs = makeViewController('IndexPage')
      lengthOfFirst: tree.TwoInputs.InputA.valueLength,
      lengthOfSecond: tree.TwoInputs.InputB.valueLength,
    },
- }))
+ })).getPublicInterface();
 
 
   // .defineStateDependenciesResolver(tree => tree)

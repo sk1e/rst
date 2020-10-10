@@ -12,7 +12,7 @@ const LengthOfAllInputs = makeViewController('LengthOfAllInputs')
       state => state.lengthOfSecond,
     ],
     (a, b) => `${a} + ${b} -> ${a + b}`,
-  )
+  ).getPublicInterface();
 
 export const { methods, useState } = LengthOfAllInputs.getViewInterface();
 export const parentInterface = LengthOfAllInputs.getParentInterface();

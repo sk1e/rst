@@ -25,7 +25,12 @@ const inputA = makeViewController('InputA')
     );
 
     return [setValue];
-  });
+  })
+  .defineEventDependency<'setOtherInputValue', { value: string}>('setOtherInputValue', (state, args) => {
+    return { value: state.value + args.value };
+    // emitters.setValue({newValue: state.value + args.value});
+  })
+  .getPublicInterface();
 
 export const { methods, useState } = inputA.getViewInterface();
 export const parentInterface = inputA.getParentInterface();
