@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { useState, methods } from './state';
+import { useState, methods } from './controller';
 
 export function InputA() {
   const state = useState();

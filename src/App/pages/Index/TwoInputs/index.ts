@@ -1,5 +1,5 @@
 import { TwoInputs as component } from './component';
-import { parentInterface } from './state';
+import { parentInterface } from './controller';
 
 export const TwoInputs = {
   component,

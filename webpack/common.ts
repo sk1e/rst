@@ -237,6 +237,12 @@ export const commonConfig: webpack.Configuration = {
     lazy: false,
     historyApiFallback: true,
     disableHostCheck: true,
+    proxy: {
+      '/msa': {
+        target: 'http://ais.contek.ru:8080',
+        changeOrigin: true,
+      },
+    },
     stats: {
       colors: true,
       errors: true,

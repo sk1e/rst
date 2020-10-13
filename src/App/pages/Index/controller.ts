@@ -2,6 +2,7 @@ import { makeViewController } from 'rst';
 
 import { TwoInputs } from './TwoInputs';
 import { LengthOfAllInputs } from './LengthOfAllInputs';
+import { Table } from './Table';
 
 type S = {};
 
@@ -11,7 +12,8 @@ type S = {};
 
 const twoInputs = makeViewController('IndexPage')
   .defineStoredState<S>({ value: 'fake' })
-  .defineChildren([TwoInputs, LengthOfAllInputs])
+  .defineChildren([TwoInputs, LengthOfAllInputs, Table])
+  // .defineChildren([Table])
 
   // .defineDerivedState(
   //   'valueLength',
@@ -28,7 +30,8 @@ const twoInputs = makeViewController('IndexPage')
      lengthOfFirst: tree.TwoInputs.InputA.valueLength,
      lengthOfSecond: tree.TwoInputs.InputB.valueLength,
    },
- })).getPublicInterface();
+ }))
+  .getPublicInterface();
 
 
   // .defineStateDependenciesResolver(tree => tree)

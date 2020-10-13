@@ -5,8 +5,8 @@ type S = {
 };
 
 const inputA = makeViewController('InputA')
-  .defineStoredState<S>({value: 'i am A' })
-  .defineStateDependency<'label', string >('label')
+  .defineStoredState<S>({ value: 'i am A' })
+  .defineStateDependency<'label', string>('label')
   .defineDerivedState(
     'valueLength',
     [state => state.value],
@@ -17,16 +17,16 @@ const inputA = makeViewController('InputA')
     [state => state.valueLength],
     x => x / 2,
   )
-  .defineEvents(({makeEvent}) => {
+  .defineEvents(({ makeEvent }) => {
     const setValue = makeEvent(
       'setValue',
-      (state, {newValue}: {newValue: string}): S =>
-        ({...state, value: newValue})
+      ({ newValue }: { newValue: string }, state): S =>
+        ({ ...state, value: newValue })
     );
 
     return [setValue];
   })
-  .defineEventDependency<'setOtherInputValue', { value: string}>('setOtherInputValue', (state, args) => {
+  .defineEventDependency<'setOtherInputValue', { value: string }>('setOtherInputValue', (args, { state }) => {
     return { value: state.value + args.value };
     // emitters.setValue({newValue: state.value + args.value});
   })

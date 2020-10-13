@@ -20,7 +20,7 @@ const inputB = makeViewController('InputB')
   .defineEvents(({makeEvent}) => {
     const setValue = makeEvent(
       'setValue',
-      (state, {newValue}: {newValue: string}): S =>
+      ({ newValue }: { newValue: string }, state): S =>
         ({...state, value: newValue})
     );
 

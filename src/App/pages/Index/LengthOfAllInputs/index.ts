@@ -1,5 +1,5 @@
 import { LengthOfAllInputs as component } from './component';
-import { parentInterface } from './state';
+import { parentInterface } from './controller';
 
 export const LengthOfAllInputs = {
   component,

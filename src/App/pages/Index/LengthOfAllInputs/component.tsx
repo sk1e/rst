@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { useState } from './state';
+import { useState } from './controller';
 
 export function LengthOfAllInputs() {
   const state = useState();

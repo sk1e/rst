@@ -1,7 +1,7 @@
-import { InputB as component } from './component';
+import { Table as component } from './component';
 import { parentInterface } from './controller';
 
-export const InputB = {
+export const Table = {
   component,
   parentInterface,
 }

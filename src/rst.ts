@@ -50,6 +50,7 @@ export type ControllerParentInterface<
   > = {
     name: Name;
     children: Children;
+    getInitialState(): any;
     stateKeyToStreamMap: Record<string, Observable<any>>;
     stateKeyToDependencyEmitterMap: Record<string, Subscriber<[string, Observable<any>]>>;
     addEmitterOnStateReceive(stateKey: string, emitter: Subscriber<[string, Observable<any>]>): void;
@@ -59,6 +60,8 @@ export type ControllerParentInterface<
     initializeStateDependencies(deps: Partial<StateDeps>): void;
     initializeEventDependencies(deps: Partial<EventDeps>): void;
   }
+
+type AnyControllerParentInterface = ControllerParentInterface<any, any, any, any, any, any, any, any, any>;
 
 export type GetStateDescendantsDependencies<Children, Deps = _GetStateDescendantsDependencies<Children>> =
   { [K in keyof Deps]: Deps[K] };
@@ -137,7 +140,7 @@ export type _GetEventDescendantsDependencies<Children, Acc = {}> =
         : never
       : never;
 
-type Event<Name extends string, FullState, StoredState, Args> = {
+export type Event<Name extends string, FullState, StoredState, Args> = {
   name: Name;
   handler: EventHandler<FullState, StoredState, Args>;
   emit(args: Args): void;
@@ -154,10 +157,10 @@ type GetEventsArguments<FullState, StoredState> = {
     handler: EventHandler<FullState, StoredState, Args>): Event<Name, FullState, StoredState, Args>;
 }
 
-type EventHandler<FullState, StoredState, Args> = (state: FullState, args: Args) => StoredState | Observable<StoredState>;
+type EventHandler<FullState, StoredState, Args> = (args: Args, state: FullState) => StoredState | void;
 
 type EventDependencyHandler<FullState, StoredState, Args, EventEmitterMap> =
-  (state: FullState, args: Args, eventEmitters: EventEmitterMap) => StoredState | void;
+  ( args: Args, dependencies: { state: FullState, eventEmitters: EventEmitterMap }) => StoredState | void;
 
 // === Definition interface types ===
 
@@ -172,11 +175,23 @@ type Child<
   >
 }
 
+type StateOfService<Service> =
+  Service extends ControllerParentInterface<infer Name, infer StoredState, infer DerivedState, any, any, any, any, any, any>
+    ? Record<Name, StoredState & DerivedState>
+    : never
+
 type ChildrenDefinitionInterface<Name extends string, StoredState> = {
   defineChildren<Children extends Array<Child<string, any, any, any, any, any, any, any, any>>>(
     chlidren: Children
   ): ControllerWithChildren<Name, StoredState, Children extends Array<infer T> ? U.ListOf<T> : never>;
 }
+
+type ServiceDefinitionInterface<Name extends string, StoredState, FullState, Children> = {
+  defineService<Service extends AnyControllerParentInterface>(
+    service: Service
+  ): ControllerWithService<Name, StoredState, FullState & StateOfService<Service>, Children extends Array<infer T> ? U.ListOf<T> : never>;
+}
+
 
 type EventDependencyDefinitionInterface<
   Name extends string, StoredState, FullState, Children, StateDeps, EventDeps,
@@ -308,11 +323,13 @@ type ControllerWithStoredState<Name extends string, StoredState> =
   StateDependencyDefinitionInterface<Name, StoredState, StoredState, [], {}> &
   DerivedStateDefinitionInterface<Name, StoredState, StoredState, [], {}, {}> &
   EventsDefinitionInterface<Name, StoredState, StoredState, [], {}, {}> &
-  ChildrenDefinitionInterface<Name, StoredState>
+  ChildrenDefinitionInterface<Name, StoredState> &
+  ServiceDefinitionInterface<Name, StoredState, StoredState, []>
   ;
 
 type ControllerWithChildren<Name extends string, StoredState, Children> =
   StateDependencyDefinitionInterface<Name, StoredState, StoredState, Children, {}> &
+  ServiceDefinitionInterface<Name, StoredState, StoredState, Children> &
   DerivedStateDefinitionInterface<Name, StoredState, StoredState, Children, {}, {}> &
   EventsDefinitionInterface<Name, StoredState, StoredState, Children, {}, {}> &
   DependenciesResolverDefinitionInterface<
@@ -323,6 +340,21 @@ type ControllerWithChildren<Name extends string, StoredState, Children> =
     GetEventDescendantsDependencies<Children>
   >
   ;
+
+type ControllerWithService<Name extends string, StoredState, FullState, Children> =
+  StateDependencyDefinitionInterface<Name, StoredState, FullState, Children, {}> &
+  ServiceDefinitionInterface<Name, StoredState, FullState, Children> &
+  DerivedStateDefinitionInterface<Name, StoredState, FullState, Children, {}, {}> &
+  EventsDefinitionInterface<Name, StoredState, FullState, Children, {}, {}> &
+  DependenciesResolverDefinitionInterface<
+    Name, StoredState, FullState, Children, {}, {}, {}, {}, GetStateDescendantsDependencies<Children>, GetEventDescendantsDependencies<Children>
+  > &
+  ControllerPublicInterface<
+    Name, StoredState, FullState, Children, {}, {}, [], {}, GetStateDescendantsDependencies<Children>,
+    GetEventDescendantsDependencies<Children>
+  >
+  ;
+
 type ControllerWithDerivedState<Name extends string, StoredState, FullState, Children, StateDeps, DerivedState> =
   DerivedStateDefinitionInterface<Name, StoredState, FullState, Children, StateDeps, DerivedState> &
   EventsDefinitionInterface<Name, StoredState, FullState, Children, StateDeps, DerivedState> &
@@ -401,6 +433,7 @@ export function makeViewController<Name extends string>(name: Name) {
       initialStoredState: StoredState,
       children: Children,
       stateDependencyKeys: string[],
+      services: AnyControllerParentInterface[],
   ): StateDependencyDefinitionInterface<Name, StoredState, FullState, Children, StateDeps> {
     return {
       defineStateDependency<Key extends string, T>(
@@ -408,10 +441,26 @@ export function makeViewController<Name extends string>(name: Name) {
       ): ControllerWithStateDependencies<
               Name, StoredState, FullState & Record<Key, T>, Children, StateDeps & Record<Key, T>
             > {
-        return makeControllerWithStateDepedencies(initialStoredState, children, [...stateDependencyKeys, key]);
+        return makeControllerWithStateDepedencies(initialStoredState, children, [...stateDependencyKeys, key], services);
       },
     }
   };
+
+  function getServiceDefinitionInterface<StoredState, FullState, Children>(
+      initialStoredState: StoredState,
+      children: Children,
+      stateDependencyKeys: string[],
+      services: AnyControllerParentInterface[],
+  ): ServiceDefinitionInterface<Name, StoredState, FullState, Children> {
+    return {
+      defineService<Service extends AnyControllerParentInterface>(
+        service: Service
+      ): ControllerWithService<Name, StoredState, FullState & StateOfService<Service>, Children> {
+        return makeControllerWithService(initialStoredState, children, stateDependencyKeys, [...services, service]) as any;
+      },
+    } as any
+  };
+
 
   function getEventDependenciesDefinitionInterface<
     StoredState, Children, FullState, StateDeps, EventDeps, DerivedState,
@@ -424,6 +473,7 @@ export function makeViewController<Name extends string>(name: Name) {
     eventDependencyDescriptions: Array<EventDependencyDescription<FullState, StoredState, any, EventEmitterMap>>,
     derivedStateAcc: DerivedStateDescription[],
     getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
+    services: AnyControllerParentInterface[],
   ): EventDependencyDefinitionInterface<
        Name, StoredState, FullState, Children, StateDeps, EventDeps, DerivedState, EventEmitterMap
      > {
@@ -434,12 +484,8 @@ export function makeViewController<Name extends string>(name: Name) {
         Name, StoredState, FullState, Children, StateDeps, EventDeps & Record<Key, Payload>, DerivedState, EventEmitterMap
       > {
         return makeControllerWithEventDepedencies(
-          initialStoredState,
-          children,
-          stateDependencyKeys,
-          [...eventDependencyDescriptions, { name, handler}],
-          derivedStateAcc,
-          getEvents,
+          initialStoredState, children, stateDependencyKeys, [...eventDependencyDescriptions, { name, handler}],
+          derivedStateAcc, getEvents, services
         );
       },
     }
@@ -450,6 +496,7 @@ export function makeViewController<Name extends string>(name: Name) {
     children: Children,
     stateDependencyKeys: string[],
     derivedStateDescription: DerivedStateDescription[],
+    services: AnyControllerParentInterface[],
   ): DerivedStateDefinitionInterface<Name, StoredState, FullState, Children, StateDeps, DerivedState> {
     return {
       defineDerivedState<P extends string, V>(
@@ -458,10 +505,8 @@ export function makeViewController<Name extends string>(name: Name) {
            Name, StoredState, FullState & Record<P, V>, Children, StateDeps, DerivedState & Record<P, V>
          > {
         return makeContollerWithDerivedState(
-          initialStoredState,
-          children,
-          stateDependencyKeys,
-          [...derivedStateDescription, { property, uses, selector }]
+          initialStoredState, children, stateDependencyKeys, [...derivedStateDescription, { property, uses, selector }],
+          services,
         );
       }
     }
@@ -473,7 +518,8 @@ export function makeViewController<Name extends string>(name: Name) {
     initialStoredState: StoredState,
     children: Children,
     stateDependencyKeys: string[],
-    derivedStateDescription: DerivedStateDescription[]
+    derivedStateDescription: DerivedStateDescription[],
+    services: AnyControllerParentInterface[],
   ): EventsDefinitionInterface<Name, StoredState, FullState, Children, StateDeps, DerivedState> {
     return {
       defineEvents<EventList extends Array<Event<string, FullState, StoredState, any>>>(
@@ -482,20 +528,22 @@ export function makeViewController<Name extends string>(name: Name) {
            Name, StoredState, FullState, Children, StateDeps, DerivedState, EventEmitterMapOf<EventList>
          > {
         return makeControllerWithEvents(
-          initialStoredState, children, stateDependencyKeys, derivedStateDescription, getEvents
+          initialStoredState, children, stateDependencyKeys, derivedStateDescription, getEvents,
+          services,
         );
       }
     };
   };
 
   function getChildrenDefinitionInterface<StoredState>(
-    initialStoredState: StoredState
+    initialStoredState: StoredState,
+    services: AnyControllerParentInterface[],
   ): ChildrenDefinitionInterface<Name, StoredState> {
     return {
       defineChildren<Children extends Array<Child<string, any, any, any, any, any, any, any, any>>>(
         children: Children,
       ): ControllerWithChildren<Name, StoredState, Children extends Array<infer T> ? U.ListOf<T> : never> {
-        return makeControllerWithChildren(initialStoredState, children as any);
+        return makeControllerWithChildren(initialStoredState, children as any, services);
       }
     }
   };
@@ -515,6 +563,7 @@ export function makeViewController<Name extends string>(name: Name) {
     derivedStateAcc: DerivedStateDescription[],
     getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
     resolvers: DependencyResolvers<any, any, any>,
+    services: AnyControllerParentInterface[],
     // TODO fix desc deps (last arg)
   ): DependenciesResolverDefinitionInterface<
     Name, StoredState, FullState, Children, StateDeps, EventDeps, DerivedState, {}, StateDescendantDeps,
@@ -527,7 +576,7 @@ export function makeViewController<Name extends string>(name: Name) {
       defineStateDependenciesResolver: resolver =>
         makeControllerWithResolver(
           initialStoredState, children, stateDependencyKeys, eventDependencyDescriptions, derivedStateAcc,
-          getEvents, {...resolvers, state: resolver}
+          getEvents, {...resolvers, state: resolver}, services
         ),
     } : {};
 
@@ -538,7 +587,7 @@ export function makeViewController<Name extends string>(name: Name) {
       defineEventDependenciesResolver: resolver =>
         makeControllerWithResolver(
           initialStoredState, children, stateDependencyKeys, eventDependencyDescriptions, derivedStateAcc,
-          getEvents, {...resolvers, events: resolver},
+          getEvents, {...resolvers, events: resolver}, services
         ),
     } : {};
 
@@ -557,13 +606,15 @@ export function makeViewController<Name extends string>(name: Name) {
     derivedStateAcc: DerivedStateDescription[],
     getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
     dependencyResolvers: DependencyResolvers<any, any, any>,
+    services: AnyControllerParentInterface[],
   ): ControllerPublicInterface<
       Name, StoredState, FullState, Children, StateDeps, EventDeps, DerivedState, EventEmitterMap, StateDescendantDeps, EventDescendantDeps
   > {
       return {
         getPublicInterface() {
           console.log('>> name', name);
-          console.log('>> keys', eventDependencyDescriptions);
+          console.log('>> deps', eventDependencyDescriptions, services);
+          // console.log('>> services', eventDependencyDescriptions);
 
           const storedStateKeys = Object.keys(initialStoredState);
 
@@ -608,7 +659,9 @@ export function makeViewController<Name extends string>(name: Name) {
           }
 
           const stateKeyToDependencyMap: Record<string, Dependency> = {
-            [predefinedStateKeys.fullState]: { kind: 'full-state', stateKeys: [predefinedStateKeys.storedAndDerivedState, ...stateDependencyKeys] },
+            [predefinedStateKeys.fullState]: {
+              kind: 'full-state',
+              stateKeys: [predefinedStateKeys.storedAndDerivedState, ...stateDependencyKeys, ...services.map(x => x.name)] },
             [predefinedStateKeys.storedAndDerivedState]: { kind: 'stored-and-derived', stateKeys: [predefinedStateKeys.storedState, predefinedStateKeys.derivedState] },
             [predefinedStateKeys.derivedState]: { kind: 'derived-state-sum', stateKeys: derivedStateAcc.map(x => x.property) },
             ...derivedStateAcc.reduce((acc: Record<string, DerivedStateDependency>, x): Record<string, DerivedStateDependency> => {
@@ -647,7 +700,7 @@ export function makeViewController<Name extends string>(name: Name) {
               }), acc), { [predefinedStateKeys.fullState]: [] as string[] });
 
           const dependencyStateKeyToExternalDependencyEmittersMap:
-          Record<string, Array<Subscriber<[string, Observable<any>]>>> = {};
+            Record<string, Array<Subscriber<[string, Observable<any>]>>> = {};
 
           const stateKeyToDependencyEmitterMap: Record<string, Subscriber<[string, Observable<any>]>> = {};
           const stateKeyToStreamMap: Record<string, Observable<any>> = {};
@@ -657,6 +710,9 @@ export function makeViewController<Name extends string>(name: Name) {
           function onStateStreamReceive(key: string, stream: Observable<any>) {
             stateKeyToStreamMap[key] = stream;
             dependencyStateKeyToDependentStateKeyMap[key].forEach(x => {
+              if (x === predefinedStateKeys.fullState) {
+                console.log('>> push', key, name);
+              }
               stateKeyToDependencyEmitterMap[x].next([key, stream])
             });
           }
@@ -669,10 +725,12 @@ export function makeViewController<Name extends string>(name: Name) {
 
             switch (dependency.kind) {
               case 'full-state': {
+                console.log('>> num', dependenciesNumber);
                 streamOfDependencyStreams.pipe(
                   o.take(dependenciesNumber),
                   o.toArray()
                 ).subscribe(keyStreamPairs => {
+                  console.log('>> full state for', name, keyStreamPairs)
                   const storedAndDerivedKeyIndex = keyStreamPairs.findIndex(x => x[0] === predefinedStateKeys.storedAndDerivedState);
                   if (storedAndDerivedKeyIndex === -1) {
                     console.error('no stored and dervied state in full state dependencies');
@@ -703,6 +761,7 @@ export function makeViewController<Name extends string>(name: Name) {
                   o.take(2),
                   o.toArray()
                 ).subscribe(([keyStreamPairX, keyStreamPairY]) => {
+                  console.log('received stored and derived', name);
                   onStateStreamReceive(stateKey, combineLatest([keyStreamPairX[1], keyStreamPairY[1]]).pipe(
                     o.map(([x, y]) => ({...x, ...y})),
                   ));
@@ -780,8 +839,9 @@ export function makeViewController<Name extends string>(name: Name) {
             }
 
             configureEventEmitters(fullStateStream);
-
+            console.log('>> full state stream', name, fullStateStream);
             fullStateStream.pipe(o.take(1)).subscribe(state => {
+              console.log('>> full state', name, state);
               initialFullState = state as FullState;
             });
 
@@ -818,10 +878,8 @@ export function makeViewController<Name extends string>(name: Name) {
             const eventNotificationWithFullStateStream = rawEventNotificationStream.pipe(o.withLatestFrom(fullStateStream));
 
             eventNotificationWithFullStateStream.subscribe(([notification, state]) => {
-              const nextState = eventHandlers[notification.eventName](state, notification.payload);
-              if (nextState instanceof Observable) {
-                nextState.subscribe(storedStateStream)
-              } else {
+              const nextState = eventHandlers[notification.eventName](notification.payload, state);
+              if (nextState !== undefined) {
                 storedStateStream.next(nextState)
               }
             });
@@ -831,6 +889,21 @@ export function makeViewController<Name extends string>(name: Name) {
 
           onStateStreamReceive(predefinedStateKeys.storedState, storedStateStream);
 
+          services.forEach(service => {
+            const serviceStateStream = service.stateKeyToStreamMap[predefinedStateKeys.fullState]
+            if (serviceStateStream === undefined) {
+              service.addEmitterOnStateReceive(
+                predefinedStateKeys.fullState,
+                stateKeyToDependencyEmitterMap[predefinedStateKeys.fullState],
+              );
+            } else {
+              service.getInitialState(); // remove it
+              console.log('>> else', service.name, serviceStateStream);
+              serviceStateStream.subscribe(st => console.log('|||>> service state', st));
+              // console.log('push')
+              stateKeyToDependencyEmitterMap[predefinedStateKeys.fullState].next([service.name, serviceStateStream]);
+            }
+          })
 
           if (dependencyResolvers.state) {
             const resolutions: Record<string, Record<string, any>> =  dependencyResolvers.state(getPathTrackingProxy());
@@ -885,6 +958,7 @@ export function makeViewController<Name extends string>(name: Name) {
             getParentInterface() {
               return {
                 name,
+                getInitialState: getInitialFullState,
                 stateKeyToStreamMap,
                 stateKeyToDependencyEmitterMap,
                 addEmitterOnStateReceive: (stateKey, emitter) => {
@@ -922,14 +996,17 @@ export function makeViewController<Name extends string>(name: Name) {
       derivedStateAcc: DerivedStateDescription[],
       getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
       resolvers: DependencyResolvers<any, any, any>,
+      services: AnyControllerParentInterface[],
     ): ControllerWithDependenciesResolver<Name, StoredState, FullState, Children, StateDeps, EventDeps,
   DerivedState, EventEmitterMap, StateDescendantDeps, EventDescendantDeps, UndefinedResolver> {
       return {
         ...getStateDependenciesResolverDefinitionInterface(
-          initialStoredState, children, stateDependencyKeys, eventDependencyDescriptions, derivedStateAcc, getEvents, resolvers
+          initialStoredState, children, stateDependencyKeys, eventDependencyDescriptions, derivedStateAcc, getEvents, resolvers,
+          services,
         ) as any, // TODO fix
         ...getPublicInterface(
           initialStoredState, children as any, stateDependencyKeys, eventDependencyDescriptions, derivedStateAcc, getEvents, resolvers,
+          services,
         )
       }
     }
@@ -937,21 +1014,43 @@ export function makeViewController<Name extends string>(name: Name) {
   function makeControllerWithChildren<StoredState, Children>(
       initialStoredState: StoredState,
       children: Children extends Array<infer T> ? U.ListOf<T> : never,
+      services: AnyControllerParentInterface[],
     ): ControllerWithChildren<Name, StoredState, Children extends Array<infer T> ? U.ListOf<T> : never> {
     return {
-      ...getDerivedStateDefinitionInterface(initialStoredState, children, [], []),
-      ...getStateDependenciesDefinitionInterface(initialStoredState, children, []),
-      ...getEventsDefinitionInterface(initialStoredState, children, [], []),
-      ...getStateDependenciesResolverDefinitionInterface(initialStoredState, children, [], [], [], () => [], {}) as any, // TODO fix
+      ...getServiceDefinitionInterface(initialStoredState, children, [], services),
+      ...getDerivedStateDefinitionInterface(initialStoredState, children, [], [], services),
+      ...getStateDependenciesDefinitionInterface(initialStoredState, children, [], services),
+      ...getEventsDefinitionInterface(initialStoredState, children, [], [], services),
+      ...getStateDependenciesResolverDefinitionInterface(initialStoredState, children, [], [], [], () => [], {}, services) as any, // TODO fix
+      ...getPublicInterface(
+          initialStoredState, children as any, [], [], [], () => [], {}, services,
+        ),
+    };
+  }
+
+  function makeControllerWithService<StoredState, FullState, Children>(
+      initialStoredState: StoredState,
+      children: Children,
+      stateDependencyKeys: string[],
+      services: AnyControllerParentInterface[],
+    ): ControllerWithService<Name, StoredState, FullState, Children> {
+    return {
+      ...getStateDependenciesDefinitionInterface(initialStoredState, children, stateDependencyKeys, services),
+      ...getServiceDefinitionInterface(initialStoredState, children, stateDependencyKeys, services),
+      ...getDerivedStateDefinitionInterface(initialStoredState, children, stateDependencyKeys, [], services),
+      ...getEventsDefinitionInterface(initialStoredState, children, stateDependencyKeys, [], services),
+      ...getStateDependenciesResolverDefinitionInterface(initialStoredState, children, stateDependencyKeys, [], [], () => [], {}, services) as any,
+      ...getPublicInterface(initialStoredState, children as any, stateDependencyKeys, [], [], () => [], {}, services) as any,
     };
   }
 
   function makeControllerWithStoredState<StoredState>(initialStoredState: StoredState): ControllerWithStoredState<Name, StoredState> {
     return {
-      ...getStateDependenciesDefinitionInterface(initialStoredState, [], []),
-      ...getEventsDefinitionInterface(initialStoredState, [], [], []),
-      ...getDerivedStateDefinitionInterface(initialStoredState, [], [], []),
-      ...getChildrenDefinitionInterface(initialStoredState),
+      ...getServiceDefinitionInterface(initialStoredState, [], [], []),
+      ...getStateDependenciesDefinitionInterface(initialStoredState, [], [], []),
+      ...getEventsDefinitionInterface(initialStoredState, [], [], [], []),
+      ...getDerivedStateDefinitionInterface(initialStoredState, [], [], [], []),
+      ...getChildrenDefinitionInterface(initialStoredState, []),
     };
   }
 
@@ -962,12 +1061,19 @@ export function makeViewController<Name extends string>(name: Name) {
     children: Children,
     stateDependencyKeys: string[],
     derivedStateDescription: DerivedStateDescription[],
+    services: AnyControllerParentInterface[],
   ): ControllerWithDerivedState<Name, StoredState, FullState, Children, StateDeps, DerivedState> {
 
     return {
-      ...getDerivedStateDefinitionInterface(initialStoredState, children, stateDependencyKeys, derivedStateDescription),
-      ...getEventsDefinitionInterface(initialStoredState, children, stateDependencyKeys, derivedStateDescription),
-      ...getPublicInterface(initialStoredState, children as any, stateDependencyKeys, [], derivedStateDescription, () => [], {}) as any,
+      ...getDerivedStateDefinitionInterface(
+        initialStoredState, children, stateDependencyKeys, derivedStateDescription, services,
+      ),
+      ...getEventsDefinitionInterface(
+        initialStoredState, children, stateDependencyKeys, derivedStateDescription, services,
+      ),
+      ...getPublicInterface(
+        initialStoredState, children as any, stateDependencyKeys, [], derivedStateDescription, () => [], {}, services,
+      ) as any,
     };
   }
 
@@ -975,13 +1081,14 @@ export function makeViewController<Name extends string>(name: Name) {
     initialStoredState: StoredState,
     children: Children,
     stateDependencyKeys: string[],
+    services: AnyControllerParentInterface[],
   ): ControllerWithStateDependencies<Name, StoredState, FullState, Children, StateDeps> {
 
     return {
-      ...getStateDependenciesDefinitionInterface(initialStoredState, children, stateDependencyKeys),
-      ...getDerivedStateDefinitionInterface(initialStoredState, children, stateDependencyKeys,  [] ),
-      ...getEventsDefinitionInterface(initialStoredState, children, stateDependencyKeys,  []),
-      ...getPublicInterface(initialStoredState, children as any, stateDependencyKeys, [], [], () => [], {}) as any,
+      ...getStateDependenciesDefinitionInterface(initialStoredState, children, stateDependencyKeys, services),
+      ...getDerivedStateDefinitionInterface(initialStoredState, children, stateDependencyKeys, [], services),
+      ...getEventsDefinitionInterface(initialStoredState, children, stateDependencyKeys, [], services),
+      ...getPublicInterface(initialStoredState, children as any, stateDependencyKeys, [], [], () => [], {}, services) as any,
     };
   }
 
@@ -996,22 +1103,18 @@ export function makeViewController<Name extends string>(name: Name) {
     eventDependencyDescriptions: Array<EventDependencyDescription<FullState, StoredState, any, EventEmitterMap>>,
     derivedStateAcc: DerivedStateDescription[],
     getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
+    services: AnyControllerParentInterface[],
   ): ControllerWithEventDependencies<
       Name, StoredState, FullState, Children, StateDeps, EventDeps, DerivedState, EventEmitterMap
      > {
 
     return {
       ...getStateDependenciesResolverDefinitionInterface(
-          initialStoredState, children, stateDependencyKeys, [], derivedStateAcc, getEvents, {},
+          initialStoredState, children, stateDependencyKeys, [], derivedStateAcc, getEvents, {}, services,
         ) as any, // TODO fix
       ...getPublicInterface(
-        initialStoredState,
-        children as any,
-        stateDependencyKeys,
-        eventDependencyDescriptions,
-        derivedStateAcc,
-        getEvents,
-        {}
+        initialStoredState, children as any, stateDependencyKeys, eventDependencyDescriptions, derivedStateAcc,
+        getEvents, {}, services,
       ) as any,
     };
   }
@@ -1025,15 +1128,18 @@ export function makeViewController<Name extends string>(name: Name) {
     stateDependencyKeys: string[],
     derivedStateAcc: DerivedStateDescription[],
     getEvents: (args: GetEventsArguments<FullState, StoredState>) => EventList,
+    services: AnyControllerParentInterface[],
   ): ControllerWithEvents<Name, StoredState, FullState, Children, StateDeps, DerivedState,  EventEmitters> {
       return {
-        ...getEventDependenciesDefinitionInterface(initialStoredState, children, stateDependencyKeys, [], derivedStateAcc, getEvents),
+        ...getEventDependenciesDefinitionInterface(
+          initialStoredState, children, stateDependencyKeys, [], derivedStateAcc, getEvents, services
+        ),
         ...getStateDependenciesResolverDefinitionInterface(
-          initialStoredState, children, stateDependencyKeys, [], derivedStateAcc, getEvents, {},
+          initialStoredState, children, stateDependencyKeys, [], derivedStateAcc, getEvents, {}, services
         ) as any, // TODO fix
         ...getPublicInterface(
-          initialStoredState, children as any, stateDependencyKeys, [], derivedStateAcc, getEvents, {},
-        )
+          initialStoredState, children as any, stateDependencyKeys, [], derivedStateAcc, getEvents, {}, services
+        ),
       }
 
     }
